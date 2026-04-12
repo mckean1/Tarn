@@ -5,7 +5,7 @@ public static class CollectorService
     public static void Refresh(World world, int seed)
     {
         var rng = new SeededRng(seed + (world.Season.Year * 1000) + world.Season.CurrentWeek);
-        var phase = GetPhase(world.Season.CurrentWeek, world.Config);
+        var phase = GetPhase(world);
         var phaseConfig = world.Config.CollectorPhases[phase];
         var justHidden = new HashSet<string>(StringComparer.Ordinal);
 
@@ -62,19 +62,20 @@ public static class CollectorService
         world.CollectorInventory.RefreshedWeek = world.Season.CurrentWeek;
     }
 
-    public static CollectorPhase GetPhase(int week, TarnConfig config)
+    public static CollectorPhase GetPhase(World world)
     {
-        if (week is >= 1 and <= 4)
+        var weeksSinceRelease = GetWeeksSinceNewestSetRelease(world);
+        if (weeksSinceRelease is >= 0 and <= 3)
         {
             return CollectorPhase.Launch;
         }
 
-        if (week is >= 5 and <= 8)
+        if (weeksSinceRelease is >= 4 and <= 7)
         {
             return CollectorPhase.Warm;
         }
 
-        if (week >= 35)
+        if (world.Season.CurrentWeek >= 35)
         {
             return CollectorPhase.Offseason;
         }
@@ -92,10 +93,10 @@ public static class CollectorService
         decimal releaseModifier = 1.00m;
         if (string.Equals(definition.SetId, newestSetId, StringComparison.Ordinal))
         {
-            releaseModifier = world.Season.CurrentWeek switch
+            releaseModifier = GetPhase(world) switch
             {
-                >= 1 and <= 4 => 1.10m,
-                >= 5 and <= 8 => 1.05m,
+                CollectorPhase.Launch => 1.10m,
+                CollectorPhase.Warm => 1.05m,
                 _ => 1.00m,
             };
         }
@@ -182,9 +183,9 @@ public static class CollectorService
                 }
 
                 card ??= pool
-                    .Where(definition => definition.Rarity == rarity && definition.Type != CardType.Champion)
+                    .Where(definition => definition.Rarity == rarity)
                     .OrderBy(definition => definition.Id, StringComparer.Ordinal)
-                    .ElementAt(rng.NextInt(pool.Count(definition => definition.Rarity == rarity && definition.Type != CardType.Champion)));
+                    .ElementAt(rng.NextInt(pool.Count(definition => definition.Rarity == rarity)));
                 awarded.Add(WorldFactory.GrantCard(world, player, card.Id));
             }
         }
@@ -204,9 +205,15 @@ public static class CollectorService
             return world.Config.Economy.PackPrices.OlderStandard;
         }
 
-        return world.Season.CurrentWeek is >= 1 and <= 4
+        return GetPhase(world) == CollectorPhase.Launch
             ? world.Config.Economy.PackPrices.NewestLaunch
             : world.Config.Economy.PackPrices.NewestNormal;
+    }
+
+    public static int GetWeeksSinceNewestSetRelease(World world)
+    {
+        var yearDelta = world.Season.Year - world.NewestSetReleaseYear;
+        return (yearDelta * world.Config.Season.TotalWeeks) + (world.Season.CurrentWeek - world.NewestSetReleaseWeek);
     }
 
     private static decimal GetMarketPressure(World world, string cardId)
@@ -329,7 +336,7 @@ public static class MarketService
             SellerPlayerId = playerId,
             MinimumBid = minimumBid,
             CreatedWeek = world.Season.CurrentWeek,
-            ExpiresWeek = world.Season.CurrentWeek,
+            ExpiresWeek = world.Season.CurrentWeek == world.Config.Season.TotalWeeks ? 1 : world.Season.CurrentWeek + 1,
             Status = ListingStatus.Active,
         };
         world.MarketListings.Add(listing);
@@ -345,8 +352,8 @@ public static class MarketService
         }
 
         var player = world.Players[playerId];
-        var highest = listing.Bids.Count == 0 ? listing.MinimumBid : listing.Bids.Max(bid => bid.Amount) + 1;
-        if (amount < highest || player.Cash < amount)
+        var highest = GetNextBidAmount(listing);
+        if (amount < highest || GetAvailableCashForBids(world, playerId, listing.Id) < amount)
         {
             return false;
         }
@@ -370,7 +377,7 @@ public static class MarketService
             var winner = listing.Bids
                 .OrderByDescending(bid => bid.Amount)
                 .ThenBy(bid => bid.PlayerId, StringComparer.Ordinal)
-                .FirstOrDefault();
+                .FirstOrDefault(bid => world.Players[bid.PlayerId].Cash >= bid.Amount);
 
             if (winner is null)
             {
@@ -395,6 +402,30 @@ public static class MarketService
             buyer.Collection.Add(owned);
             listing.Status = ListingStatus.Sold;
         }
+    }
+
+    public static int GetNextBidAmount(MarketListing listing)
+    {
+        return listing.Bids.Count == 0 ? listing.MinimumBid : listing.Bids.Max(bid => bid.Amount) + 1;
+    }
+
+    public static int GetAvailableCashForBids(World world, string playerId, string? excludingListingId = null)
+    {
+        var player = world.Players[playerId];
+        return player.Cash - GetCommittedCash(world, playerId, excludingListingId);
+    }
+
+    private static int GetCommittedCash(World world, string playerId, string? excludingListingId)
+    {
+        return world.MarketListings
+            .Where(listing => listing.Status == ListingStatus.Active)
+            .Where(listing => !string.Equals(listing.Id, excludingListingId, StringComparison.Ordinal))
+            .Select(listing => listing.Bids
+                .Where(bid => string.Equals(bid.PlayerId, playerId, StringComparison.Ordinal))
+                .OrderByDescending(bid => bid.Amount)
+                .FirstOrDefault())
+            .Where(bid => bid is not null)
+            .Sum(bid => bid!.Amount);
     }
 
     private static bool CanList(World world, Player player, OwnedCard card)

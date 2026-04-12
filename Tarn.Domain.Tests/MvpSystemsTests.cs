@@ -182,6 +182,7 @@ public sealed class MvpSystemsTests
         var listing = MarketService.CreateAuctionListing(world, seller.Id, card.InstanceId, 100)!;
         Assert.NotNull(listing);
         Assert.True(MarketService.PlaceBid(world, buyer.Id, listing.Id, 120));
+        world.Season.CurrentWeek = listing.ExpiresWeek;
 
         MarketService.SettleWeek(world);
 
@@ -195,15 +196,23 @@ public sealed class MvpSystemsTests
     {
         var world = new WorldFactory().CreateNewWorld();
         var cardId = world.CardVersions.Keys.First();
-        world.Season.CardStats[cardId] = new CardUsageStats
+        world.LastCompletedSeasonStats = new CompletedSeasonStats
         {
-            CardId = cardId,
-            DeckAppearances = 10,
-            MatchWins = 9,
-            MatchLosses = 1,
-            PlayoffDeckAppearances = 8,
-            MarketDemand = 10,
-            RoleDemand = 10,
+            SeasonYear = world.Season.Year,
+            IsFrozen = true,
+            CardStats = new Dictionary<string, CardUsageStats>
+            {
+                [cardId] = new()
+                {
+                    CardId = cardId,
+                    DeckAppearances = 10,
+                    MatchWins = 9,
+                    MatchLosses = 1,
+                    PlayoffDeckAppearances = 8,
+                    MarketDemand = 10,
+                    RoleDemand = 10,
+                },
+            },
         };
 
         typeof(WorldSimulator).GetMethod("ApplySeasonalPatches", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
@@ -211,6 +220,264 @@ public sealed class MvpSystemsTests
 
         Assert.True(world.CardVersions[cardId].Count >= 2);
         Assert.All(world.PatchHistory, patch => Assert.InRange(patch.Operations.Count, 1, 2));
+    }
+
+    [Fact]
+    public void CompletedSeasonStats_SurviveIntoPatchWeek()
+    {
+        var world = new WorldFactory().CreateNewWorld();
+        world.Season.CurrentWeek = world.Config.Season.SeasonCloseWeek;
+        world.Season.CardStats["CARD-A"] = new CardUsageStats { CardId = "CARD-A", DeckAppearances = 3, MatchWins = 2, MatchLosses = 1 };
+        var simulator = new WorldSimulator();
+
+        simulator.ResolveAdministrativeWeek(world, seed: 1);
+        Assert.Equal(3, world.LastCompletedSeasonStats!.CardStats["CARD-A"].DeckAppearances);
+
+        typeof(WorldSimulator).GetMethod("StartNextSeasonSchedule", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .Invoke(simulator, [world]);
+
+        Assert.Equal(3, world.LastCompletedSeasonStats!.CardStats["CARD-A"].DeckAppearances);
+        Assert.Empty(world.Season.CardStats);
+    }
+
+    [Fact]
+    public void ApplySeasonalPatches_ReadsFrozenCompletedSeasonStats()
+    {
+        var world = new WorldFactory().CreateNewWorld();
+        var cardId = world.CardVersions.Keys.First();
+        world.LastCompletedSeasonStats = new CompletedSeasonStats
+        {
+            SeasonYear = 1,
+            IsFrozen = true,
+            CardStats = new Dictionary<string, CardUsageStats>
+            {
+                [cardId] = new()
+                {
+                    CardId = cardId,
+                    DeckAppearances = 10,
+                    MatchWins = 10,
+                    MatchLosses = 0,
+                    PlayoffDeckAppearances = 10,
+                    MarketDemand = 10,
+                    RoleDemand = 10,
+                },
+            },
+        };
+        world.Season.CardStats[cardId] = new CardUsageStats { CardId = cardId, DeckAppearances = 0, MatchWins = 0, MatchLosses = 10 };
+
+        typeof(WorldSimulator).GetMethod("ApplySeasonalPatches", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .Invoke(new WorldSimulator(), [world]);
+
+        Assert.Contains(world.PatchHistory, patch => patch.CardId == cardId);
+    }
+
+    [Fact]
+    public void NewSeasonStats_StartFreshAfterPatchingLifecycle()
+    {
+        var world = new WorldFactory().CreateNewWorld();
+        world.Season.CurrentWeek = world.Config.Season.SeasonCloseWeek;
+        world.Season.CardStats["CARD-A"] = new CardUsageStats { CardId = "CARD-A", DeckAppearances = 4 };
+        var simulator = new WorldSimulator();
+
+        simulator.ResolveAdministrativeWeek(world, 1);
+        typeof(WorldSimulator).GetMethod("StartNextSeasonSchedule", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .Invoke(simulator, [world]);
+        world.Season.CurrentWeek = world.Config.Season.PatchWeek;
+        simulator.ResolveAdministrativeWeek(world, 1);
+
+        Assert.Empty(world.Season.CardStats);
+        Assert.NotNull(world.LastCompletedSeasonStats);
+    }
+
+    [Fact]
+    public void NewListing_RemainsOpenUntilNextWeeksSettlement()
+    {
+        var world = new WorldFactory().CreateNewWorld();
+        var seller = world.Players.Values.Single(player => player.IsHuman);
+        var card = WorldFactory.GrantCard(world, seller, seller.Collection.First(entry => world.GetLatestDefinition(entry.CardId).Type != CardType.Champion).CardId);
+
+        var listing = MarketService.CreateAuctionListing(world, seller.Id, card.InstanceId, 100)!;
+
+        Assert.Equal(world.Season.CurrentWeek + 1, listing.ExpiresWeek);
+        MarketService.SettleWeek(world);
+        Assert.Equal(ListingStatus.Active, listing.Status);
+    }
+
+    [Fact]
+    public void AiCanBidOnListingBeforeSettlement()
+    {
+        var world = new WorldFactory().CreateNewWorld();
+        var seller = world.Players.Values.Single(player => player.IsHuman);
+        var card = WorldFactory.GrantCard(world, seller, seller.Collection.First(entry => world.GetLatestDefinition(entry.CardId).Type != CardType.Champion).CardId);
+        var listing = MarketService.CreateAuctionListing(world, seller.Id, card.InstanceId, 50)!;
+
+        new WorldSimulator().StepWeek(world, 1);
+
+        Assert.NotEmpty(listing.Bids);
+    }
+
+    [Fact]
+    public void ListingsSettleOnNextWeeklyCadence()
+    {
+        var world = new WorldFactory().CreateNewWorld();
+        var seller = world.Players.Values.Single(player => player.IsHuman);
+        var buyer = world.Players.Values.First(player => !player.IsHuman);
+        var card = WorldFactory.GrantCard(world, seller, seller.Collection.First(entry => world.GetLatestDefinition(entry.CardId).Type != CardType.Champion).CardId);
+        var listing = MarketService.CreateAuctionListing(world, seller.Id, card.InstanceId, 50)!;
+        Assert.True(MarketService.PlaceBid(world, buyer.Id, listing.Id, 60));
+
+        var simulator = new WorldSimulator();
+        simulator.StepWeek(world, 1);
+        simulator.StepWeek(world, 2);
+
+        Assert.Equal(ListingStatus.Sold, listing.Status);
+    }
+
+    [Fact]
+    public void BiddersCannotOvercommitAcrossListings()
+    {
+        var world = new WorldFactory().CreateNewWorld();
+        var seller = world.Players.Values.Single(player => player.IsHuman);
+        var buyer = world.Players.Values.First(player => !player.IsHuman);
+        buyer.Cash = 100;
+        var cardOne = WorldFactory.GrantCard(world, seller, seller.Collection.First(entry => world.GetLatestDefinition(entry.CardId).Type != CardType.Champion).CardId);
+        var cardTwo = WorldFactory.GrantCard(world, seller, seller.Collection.First(entry => world.GetLatestDefinition(entry.CardId).Type != CardType.Champion).CardId);
+        var listingOne = MarketService.CreateAuctionListing(world, seller.Id, cardOne.InstanceId, 60)!;
+        var listingTwo = MarketService.CreateAuctionListing(world, seller.Id, cardTwo.InstanceId, 60)!;
+
+        Assert.True(MarketService.PlaceBid(world, buyer.Id, listingOne.Id, 60));
+        Assert.False(MarketService.PlaceBid(world, buyer.Id, listingTwo.Id, 60));
+    }
+
+    [Fact]
+    public void SettlementFallsBackToNextValidBid()
+    {
+        var world = new WorldFactory().CreateNewWorld();
+        var seller = world.Players.Values.Single(player => player.IsHuman);
+        var topBidder = world.Players["PLY002"];
+        var fallbackBidder = world.Players["PLY003"];
+        topBidder.Cash = 0;
+        fallbackBidder.Cash = 200;
+        var card = WorldFactory.GrantCard(world, seller, seller.Collection.First(entry => world.GetLatestDefinition(entry.CardId).Type != CardType.Champion).CardId);
+        var listing = MarketService.CreateAuctionListing(world, seller.Id, card.InstanceId, 50)!;
+        listing.Bids.Add(new Bid { PlayerId = topBidder.Id, Amount = 100 });
+        listing.Bids.Add(new Bid { PlayerId = fallbackBidder.Id, Amount = 80 });
+        world.Season.CurrentWeek = listing.ExpiresWeek;
+
+        MarketService.SettleWeek(world);
+
+        Assert.Equal(ListingStatus.Sold, listing.Status);
+        Assert.Contains(fallbackBidder.Collection, owned => owned.InstanceId == card.InstanceId);
+        Assert.Equal(1576, seller.Cash);
+    }
+
+    [Fact]
+    public void ListingExpiresOnlyWhenNoValidBidsRemain()
+    {
+        var world = new WorldFactory().CreateNewWorld();
+        var seller = world.Players.Values.Single(player => player.IsHuman);
+        var bidder = world.Players.Values.First(player => !player.IsHuman);
+        bidder.Cash = 0;
+        var card = WorldFactory.GrantCard(world, seller, seller.Collection.First(entry => world.GetLatestDefinition(entry.CardId).Type != CardType.Champion).CardId);
+        var listing = MarketService.CreateAuctionListing(world, seller.Id, card.InstanceId, 50)!;
+        listing.Bids.Add(new Bid { PlayerId = bidder.Id, Amount = 100 });
+        world.Season.CurrentWeek = listing.ExpiresWeek;
+
+        MarketService.SettleWeek(world);
+
+        Assert.Equal(ListingStatus.Expired, listing.Status);
+        Assert.Contains(seller.Collection, owned => owned.InstanceId == card.InstanceId);
+    }
+
+    [Fact]
+    public void FirstRefreshAfterNewSetReleaseUsesLaunchBehavior()
+    {
+        var world = new WorldFactory().CreateNewWorld();
+        world.Season.CurrentWeek = world.Config.Season.GrantWeek;
+        world.NewestSetReleaseYear = world.Season.Year;
+        world.NewestSetReleaseWeek = world.Season.CurrentWeek;
+
+        CollectorService.Refresh(world, 1);
+
+        Assert.Equal(CollectorPhase.Launch, CollectorService.GetPhase(world));
+        Assert.Equal(world.Config.CollectorPhases[CollectorPhase.Launch].Singles, world.CollectorInventory.Singles.Count);
+    }
+
+    [Fact]
+    public void NewestSetPacksUseLaunchPricingImmediatelyOnRelease()
+    {
+        var world = new WorldFactory().CreateNewWorld();
+        world.Season.CurrentWeek = world.Config.Season.GrantWeek;
+        world.NewestSetReleaseYear = world.Season.Year;
+        world.NewestSetReleaseWeek = world.Season.CurrentWeek;
+
+        var newestSetId = world.StandardSetIds.Last();
+
+        Assert.Equal(world.Config.Economy.PackPrices.NewestLaunch, CollectorService.GetPackPrice(world, newestSetId));
+    }
+
+    [Fact]
+    public void ReleaseWindowTransitionsFromLaunchToWarmToNormal()
+    {
+        var world = new WorldFactory().CreateNewWorld();
+        world.NewestSetReleaseYear = world.Season.Year;
+        world.NewestSetReleaseWeek = 10;
+
+        world.Season.CurrentWeek = 10;
+        Assert.Equal(CollectorPhase.Launch, CollectorService.GetPhase(world));
+        world.Season.CurrentWeek = 15;
+        Assert.Equal(CollectorPhase.Warm, CollectorService.GetPhase(world));
+        world.Season.CurrentWeek = 19;
+        Assert.Equal(CollectorPhase.Normal, CollectorService.GetPhase(world));
+    }
+
+    [Fact]
+    public void CommonPackSlotsCanProduceCommonChampions()
+    {
+        var world = CreatePackTestWorld(CardRarity.Common);
+        var player = world.Players.Values.Single(item => item.IsHuman);
+
+        var awarded = CollectorService.OpenPack(world, player, world.StandardSetIds.Last(), 1);
+
+        Assert.Contains(awarded, owned => world.GetLatestDefinition(owned.CardId).Type == CardType.Champion && world.GetLatestDefinition(owned.CardId).Rarity == CardRarity.Common);
+    }
+
+    [Fact]
+    public void RarePackSlotsCanProduceRareChampions()
+    {
+        var world = CreatePackTestWorld(CardRarity.Rare);
+        var player = world.Players.Values.Single(item => item.IsHuman);
+
+        var awarded = CollectorService.OpenPack(world, player, world.StandardSetIds.Last(), 1);
+
+        Assert.Contains(awarded, owned => world.GetLatestDefinition(owned.CardId).Type == CardType.Champion && world.GetLatestDefinition(owned.CardId).Rarity == CardRarity.Rare);
+    }
+
+    [Fact]
+    public void EpicNonUpgradedSlotsCanProduceEpicChampions()
+    {
+        var world = CreatePackTestWorld(CardRarity.Epic);
+        var player = world.Players.Values.Single(item => item.IsHuman);
+
+        var awarded = CollectorService.OpenPack(world, player, world.StandardSetIds.Last(), 1);
+
+        Assert.Contains(awarded, owned => world.GetLatestDefinition(owned.CardId).Type == CardType.Champion && world.GetLatestDefinition(owned.CardId).Rarity == CardRarity.Epic);
+    }
+
+    [Fact]
+    public void LegendaryUpgradesStillRespectUnissuedOnlyRules()
+    {
+        var world = new WorldFactory().CreateNewWorld();
+        var player = world.Players.Values.Single(item => item.IsHuman);
+        var newestSet = world.StandardSetIds.Last();
+        var set = world.CardSets[newestSet];
+        var issued = set.UnissuedLegendaryIds.First();
+        set.HiddenCollectorLegendaryIds.Add(issued);
+        set.UnissuedLegendaryIds.Remove(issued);
+
+        var awarded = CollectorService.OpenPack(world, player, newestSet, 999);
+
+        Assert.DoesNotContain(awarded, owned => string.Equals(owned.CardId, issued, StringComparison.Ordinal));
     }
 
     private static void SeedStandingsForPlayoffs(World world, LeagueTier league)
@@ -224,5 +491,37 @@ public sealed class MvpSystemsTests
                 world.Season.Standings[players[index]].GameDifferential = 20 - index;
             }
         }
+    }
+
+    private static World CreatePackTestWorld(CardRarity highlightedRarity)
+    {
+        var world = new WorldFactory().CreateNewWorld();
+        var setId = world.StandardSetIds.Last();
+        var cards = world.CardVersions.Values.Select(list => list.Last().Definition).Where(card => string.Equals(card.SetId, setId, StringComparison.Ordinal)).ToList();
+        var commonChampion = cards.First(card => card.Type == CardType.Champion && card.Rarity == CardRarity.Common).Id;
+        var commonOther = cards.First(card => card.Type != CardType.Champion && card.Rarity == CardRarity.Common).Id;
+        var rareChampion = cards.First(card => card.Type == CardType.Champion && card.Rarity == CardRarity.Rare).Id;
+        var rareOther = cards.First(card => card.Type != CardType.Champion && card.Rarity == CardRarity.Rare).Id;
+        var epicChampion = cards.First(card => card.Type == CardType.Champion && card.Rarity == CardRarity.Epic).Id;
+        var epicOther = cards.First(card => card.Type != CardType.Champion && card.Rarity == CardRarity.Epic).Id;
+        var legendary = cards.First(card => card.Rarity == CardRarity.Legendary).Id;
+
+        var chosen = new List<string> { legendary };
+        chosen.Add(highlightedRarity == CardRarity.Common ? commonChampion : commonOther);
+        chosen.Add(highlightedRarity == CardRarity.Rare ? rareChampion : rareOther);
+        chosen.Add(highlightedRarity == CardRarity.Epic ? epicChampion : epicOther);
+
+        world.CardSets[setId] = new CardSet
+        {
+            Id = setId,
+            Sequence = world.CardSets[setId].Sequence,
+            Name = world.CardSets[setId].Name,
+            Keywords = world.CardSets[setId].Keywords,
+            CardIds = chosen,
+            UnissuedLegendaryIds = new HashSet<string>([legendary], StringComparer.Ordinal),
+            HiddenCollectorLegendaryIds = new HashSet<string>(StringComparer.Ordinal),
+        };
+
+        return world;
     }
 }

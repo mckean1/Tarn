@@ -6,8 +6,8 @@ public sealed class WorldSimulator
 
     public void StepWeek(World world, int seed)
     {
-        MarketService.SettleWeek(world);
         RunAiMarketPhase(world, seed);
+        MarketService.SettleWeek(world);
         EnsureDeckSubmissions(world);
 
         if (world.Season.CurrentWeek <= world.Config.Season.RegularSeasonWeeks)
@@ -130,11 +130,21 @@ public sealed class WorldSimulator
         {
             world.Season.StatsLocked = true;
             BuildFinalPlacements(world);
+            FreezeCompletedSeasonStats(world);
             return;
         }
 
         if (world.Season.CurrentWeek == world.Config.Season.RewardWeek)
         {
+            world.LastCompletedSeasonStats ??= new CompletedSeasonStats
+            {
+                SeasonYear = world.Season.Year,
+                IsFrozen = true,
+                CardStats = world.Season.CardStats.ToDictionary(
+                    pair => pair.Key,
+                    pair => CloneStats(pair.Value),
+                    StringComparer.Ordinal),
+            };
             PayoutRewards(world);
             ApplyPromotionRelegation(world);
             RebuildDivisions(world);
@@ -152,6 +162,8 @@ public sealed class WorldSimulator
 
         if (world.Season.CurrentWeek == world.Config.Season.GrantWeek)
         {
+            world.NewestSetReleaseYear = world.Season.Year;
+            world.NewestSetReleaseWeek = world.Season.CurrentWeek;
             GrantNewSeasonCards(world, seed);
             CollectorService.Refresh(world, seed);
             world.Season.StatsLocked = false;
@@ -310,6 +322,17 @@ public sealed class WorldSimulator
             if (single is not null && rng.NextInt(100) < 15)
             {
                 CollectorService.BuySingle(world, player.Id, single.ListingId);
+            }
+
+            var auction = world.MarketListings
+                .Where(listing => listing.Status == ListingStatus.Active)
+                .Where(listing => !string.Equals(listing.SellerPlayerId, player.Id, StringComparison.Ordinal))
+                .Where(listing => MarketService.GetAvailableCashForBids(world, player.Id, listing.Id) >= MarketService.GetNextBidAmount(listing))
+                .OrderBy(listing => MarketService.GetNextBidAmount(listing))
+                .FirstOrDefault();
+            if (auction is not null)
+            {
+                MarketService.PlaceBid(world, player.Id, auction.Id, MarketService.GetNextBidAmount(auction));
             }
 
             var duplicate = player.Collection
@@ -535,10 +558,12 @@ public sealed class WorldSimulator
 
     private void ApplySeasonalPatches(World world)
     {
+        var statsSource = world.LastCompletedSeasonStats?.CardStats
+            ?? throw new InvalidOperationException("Completed season stats must be frozen before seasonal patching.");
         foreach (var versionList in world.CardVersions.Values)
         {
             var latest = versionList.OrderByDescending(version => version.Version).First();
-            var stats = world.Season.CardStats.GetValueOrDefault(latest.CardId) ?? new CardUsageStats { CardId = latest.CardId };
+            var stats = statsSource.GetValueOrDefault(latest.CardId) ?? new CardUsageStats { CardId = latest.CardId };
             var classification = CardHealthAnalyzer.Classify(stats, world.Config.PatchThresholds);
             if (classification is PatchClassification.Healthy or PatchClassification.Watchlist)
             {
@@ -598,6 +623,33 @@ public sealed class WorldSimulator
                 WorldFactory.GrantCard(world, player, card.Id);
             }
         }
+    }
+
+    private void FreezeCompletedSeasonStats(World world)
+    {
+        world.LastCompletedSeasonStats = new CompletedSeasonStats
+        {
+            SeasonYear = world.Season.Year,
+            IsFrozen = true,
+            CardStats = world.Season.CardStats.ToDictionary(
+                pair => pair.Key,
+                pair => CloneStats(pair.Value),
+                StringComparer.Ordinal),
+        };
+    }
+
+    private static CardUsageStats CloneStats(CardUsageStats stats)
+    {
+        return new CardUsageStats
+        {
+            CardId = stats.CardId,
+            DeckAppearances = stats.DeckAppearances,
+            MatchWins = stats.MatchWins,
+            MatchLosses = stats.MatchLosses,
+            PlayoffDeckAppearances = stats.PlayoffDeckAppearances,
+            MarketDemand = stats.MarketDemand,
+            RoleDemand = stats.RoleDemand,
+        };
     }
 }
 

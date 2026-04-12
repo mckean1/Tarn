@@ -22,6 +22,8 @@ public sealed class WorldFactory
                 CurrentWeek = 1,
                 StatsLocked = false,
             },
+            NewestSetReleaseYear = 1,
+            NewestSetReleaseWeek = 1,
         };
 
         BootstrapSets(world);

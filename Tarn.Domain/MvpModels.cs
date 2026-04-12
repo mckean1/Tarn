@@ -135,6 +135,13 @@ public sealed class Season
     public Dictionary<string, CardUsageStats> CardStats { get; init; } = new(StringComparer.Ordinal);
 }
 
+public sealed class CompletedSeasonStats
+{
+    public int SeasonYear { get; init; }
+    public bool IsFrozen { get; init; }
+    public Dictionary<string, CardUsageStats> CardStats { get; init; } = new(StringComparer.Ordinal);
+}
+
 public sealed class CollectorSingleOffer
 {
     public required string ListingId { get; init; }
@@ -195,6 +202,7 @@ public sealed class World
 {
     public required TarnConfig Config { get; init; }
     public required Season Season { get; set; }
+    public CompletedSeasonStats? LastCompletedSeasonStats { get; set; }
     public Dictionary<LeagueTier, LeagueState> Leagues { get; init; } = [];
     public Dictionary<string, Player> Players { get; init; } = new(StringComparer.Ordinal);
     public Dictionary<string, Division> Divisions { get; init; } = new(StringComparer.Ordinal);
@@ -205,6 +213,8 @@ public sealed class World
     public CollectorInventory CollectorInventory { get; set; } = new();
     public List<PatchResult> PatchHistory { get; init; } = [];
     public int NextCardInstanceNumber { get; set; } = 1;
+    public int NewestSetReleaseYear { get; set; }
+    public int NewestSetReleaseWeek { get; set; }
 }
 
 public sealed class LeagueState
