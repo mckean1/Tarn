@@ -50,7 +50,6 @@ public sealed class DashboardController : IPlayScreenController
                 [
                     "Advance the world simulation by one week.",
                     "This will save the world and refresh the UI.",
-                    "Press Y to confirm or Esc to cancel.",
                 ],
                 PendingAction = new PendingAction(PendingActionKind.AdvanceWeek, "Advance Week", "Simulate the next week."),
             },

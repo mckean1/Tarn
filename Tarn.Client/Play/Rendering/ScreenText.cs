@@ -31,4 +31,42 @@ public static class ScreenText
     }
 
     public static string Secondary(string text) => TerminalStyle.Secondary(text);
+
+    public static IReadOnlyList<string> WrapLines(string text, int width)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return [string.Empty];
+        }
+
+        var safeWidth = Math.Max(1, width);
+        var words = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var lines = new List<string>();
+        var current = string.Empty;
+        foreach (var word in words)
+        {
+            var candidate = string.IsNullOrEmpty(current) ? word : $"{current} {word}";
+            if (Layout.VisibleLength(candidate) <= safeWidth)
+            {
+                current = candidate;
+                continue;
+            }
+
+            if (!string.IsNullOrEmpty(current))
+            {
+                lines.Add(Layout.Truncate(current, safeWidth));
+                current = word;
+                continue;
+            }
+
+            lines.Add(Layout.Truncate(word, safeWidth));
+        }
+
+        if (!string.IsNullOrEmpty(current))
+        {
+            lines.Add(Layout.Truncate(current, safeWidth));
+        }
+
+        return lines;
+    }
 }

@@ -252,46 +252,46 @@ public static class TarnCardRegistry
     public static readonly IReadOnlyDictionary<string, UnitCardDefinition> Units =
         new List<UnitCardDefinition>
         {
-            new("UN001", "Iron Squire", Attack: 1, Health: 3, HasDefender: true, Traits: ["Soldier"]),
-            new("UN002", "Bastion Hound", Attack: 2, Health: 4, HasDefender: true, Traits: ["Beast"]),
-            new("UN003", "Shield Acolyte", Attack: 1, Health: 2, Traits: ["Cleric"]),
-            new("UN004", "Stoneframe Guard", Attack: 1, Health: 5, HasDefender: true, Traits: ["Construct"]),
-            new("UN005", "Coil Sprite", Attack: 2, Health: 2, HasMagnet: true, Traits: ["Spirit"]),
-            new("UN006", "Lure Beetle", Attack: 1, Health: 4, HasMagnet: true, Traits: ["Beast"]),
-            new("UN007", "Static Adept", Attack: 2, Health: 3, Traits: ["Mystic"]),
-            new("UN008", "Mirror Lancer", Attack: 3, Health: 2, HasMagnet: true, Traits: ["Knight"]),
-            new("UN009", "Grave Tender", Attack: 2, Health: 1, Traits: ["Undead"]),
-            new("UN010", "Ash Drifter", Attack: 3, Health: 1, Traits: ["Spirit"]),
-            new("UN011", "Bone Clerk", Attack: 1, Health: 2, Traits: ["Undead"]),
-            new("UN012", "Relic Rat", Attack: 2, Health: 2, Traits: ["Beast"]),
-            new("UN013", "Banner Runner", Attack: 2, Health: 2, Traits: ["Soldier"]),
-            new("UN014", "Hearthblade Initiate", Attack: 3, Health: 2, Traits: ["Duelist"]),
-            new("UN015", "Bronze Turtle", Attack: 1, Health: 5, Traits: ["Beast"]),
-            new("UN016", "Emberfoot Scout", Attack: 3, Health: 1, Traits: ["Scout"]),
-            new("UN017", "Marching Clerk", Attack: 2, Health: 3, Traits: ["Citizen"]),
-            new("UN018", "Field Surgeon", Attack: 1, Health: 3, Traits: ["Cleric"]),
-            new("UN019", "Wardscribe Page", Attack: 1, Health: 3, Traits: ["Scholar"]),
-            new("UN020", "Spellscar Witness", Attack: 2, Health: 3, Traits: ["Mystic"]),
+            new("UN001", "Ashen Scout", Attack: 1, Health: 3, HasDefender: true, Traits: ["Soldier"]),
+            new("UN002", "Grave Pike", Attack: 2, Health: 4, HasDefender: true, Traits: ["Beast"]),
+            new("UN003", "Lantern Sentry", Attack: 1, Health: 2, Traits: ["Cleric"]),
+            new("UN004", "Mire Raider", Attack: 1, Health: 5, HasDefender: true, Traits: ["Construct"]),
+            new("UN005", "Iron Vagrant", Attack: 2, Health: 2, HasMagnet: true, Traits: ["Spirit"]),
+            new("UN006", "Hollow Stalker", Attack: 1, Health: 4, HasMagnet: true, Traits: ["Beast"]),
+            new("UN007", "Briar Duelist", Attack: 2, Health: 3, Traits: ["Mystic"]),
+            new("UN008", "Cinder Wolf", Attack: 3, Health: 2, HasMagnet: true, Traits: ["Knight"]),
+            new("UN009", "Marsh Hunter", Attack: 2, Health: 1, Traits: ["Undead"]),
+            new("UN010", "Stoneblade Initiate", Attack: 3, Health: 1, Traits: ["Spirit"]),
+            new("UN011", "Dusk Skirmisher", Attack: 1, Health: 2, Traits: ["Undead"]),
+            new("UN012", "Ember Watcher", Attack: 2, Health: 2, Traits: ["Beast"]),
+            new("UN013", "Rustshield Guard", Attack: 2, Health: 2, Traits: ["Soldier"]),
+            new("UN014", "Nightfen Strider", Attack: 3, Health: 2, Traits: ["Duelist"]),
+            new("UN015", "Thorn Pike Adept", Attack: 1, Health: 5, Traits: ["Beast"]),
+            new("UN016", "Pale Banneret", Attack: 3, Health: 1, Traits: ["Scout"]),
+            new("UN017", "Rook Outrider", Attack: 2, Health: 3, Traits: ["Citizen"]),
+            new("UN018", "Soottrail Ranger", Attack: 1, Health: 3, Traits: ["Cleric"]),
+            new("UN019", "Warden of Cinders", Attack: 1, Health: 3, Traits: ["Scholar"]),
+            new("UN020", "Blackbriar Sentinel", Attack: 2, Health: 3, Traits: ["Mystic"]),
         }.ToDictionary(card => card.Id, StringComparer.Ordinal);
 
     public static readonly IReadOnlyDictionary<string, SpellCardDefinition> Spells =
         new List<SpellCardDefinition>
         {
-            new("SP001", "Searing Order", ["Arcane"]),
-            new("SP002", "Ruin Volley", ["Arcane"]),
-            new("SP003", "Rallying Script", ["Tactic"]),
-            new("SP004", "Fortify Line", ["Tactic"]),
-            new("SP005", "Guided Coil", ["Arcane"]),
-            new("SP006", "Mending Light", ["Holy"]),
+            new("SP001", "Iron Rite", ["Arcane"]),
+            new("SP002", "Ember Sigil", ["Arcane"]),
+            new("SP003", "Thorn Lash", ["Tactic"]),
+            new("SP004", "Gravebind", ["Tactic"]),
+            new("SP005", "Ashfall Burst", ["Arcane"]),
+            new("SP006", "Lantern Flare", ["Holy"]),
         }.ToDictionary(card => card.Id, StringComparer.Ordinal);
 
     public static readonly IReadOnlyDictionary<string, CounterCardDefinition> Counters =
         new List<CounterCardDefinition>
         {
-            new("CT001", "Snap Denial", CounterTriggerType.EnemySpellWouldResolve, ["Arcane"]),
-            new("CT002", "Quiet Refusal", CounterTriggerType.EnemyAbilityWouldResolve, ["Arcane"]),
-            new("CT003", "Chain Break", CounterTriggerType.EnemyCounterWouldResolve, ["Arcane"]),
-            new("CT004", "Brace the Line", CounterTriggerType.EnemyUnitAttacks, ["Tactic"]),
+            new("CT001", "Bastion Ward", CounterTriggerType.EnemySpellWouldResolve, ["Arcane"]),
+            new("CT002", "Null Brand", CounterTriggerType.EnemyAbilityWouldResolve, ["Arcane"]),
+            new("CT003", "Turn Aside", CounterTriggerType.EnemyCounterWouldResolve, ["Arcane"]),
+            new("CT004", "Last Denial", CounterTriggerType.EnemyUnitAttacks, ["Tactic"]),
         }.ToDictionary(card => card.Id, StringComparer.Ordinal);
 
     public static readonly IReadOnlyList<CardDefinition> NonChampionPool =

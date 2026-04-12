@@ -58,7 +58,7 @@ public sealed class CollectorController : IPlayScreenController
             {
                 Kind = ModalKind.Confirmation,
                 Title = title,
-                Lines = [line, "Press Y to confirm or Esc to cancel."],
+                Lines = [line],
                 PendingAction = new PendingAction(kind, title, line, ReferenceId: referenceId),
             },
         };

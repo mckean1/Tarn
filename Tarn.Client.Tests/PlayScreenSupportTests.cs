@@ -71,10 +71,11 @@ public sealed class PlayScreenSupportTests
         tracker.Invalidate();
         Assert.True(tracker.BeginRender(state));
 
-        Assert.True(tracker.UpdateWindow(state, 100, 30));
+        Assert.True(tracker.UpdateWindow(state, 58, 18));
         Assert.True(tracker.BeginRender(state));
-        Assert.Equal(100, state.WindowWidth);
-        Assert.Equal(30, state.WindowHeight);
+        Assert.Equal(58, state.WindowWidth);
+        Assert.Equal(18, state.WindowHeight);
+        Assert.Equal(57, FrameNormalizer.GetDrawableWidth(state.WindowWidth));
     }
 
     [Fact]

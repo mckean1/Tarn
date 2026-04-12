@@ -2,6 +2,12 @@ namespace Tarn.Domain;
 
 public sealed class WorldFactory
 {
+    private static readonly string[] AiNamePool =
+    [
+        "Rowan", "Veyra", "Orin", "Selka", "Dain", "Mirel", "Kael", "Bryn", "Thorne", "Elira",
+        "Garrick", "Nyra", "Corven", "Lyra", "Sable", "Tovin", "Maelis", "Rook", "Ilya", "Kestrel",
+    ];
+
     private readonly TarnConfig config;
     private readonly CardGenerator generator;
 
@@ -52,10 +58,13 @@ public sealed class WorldFactory
     private void BootstrapLeaguesAndPlayers(World world, string humanPlayerName)
     {
         var playerCounter = 1;
-        foreach (var tier in config.Leagues.LeagueOrder)
+        for (var leagueIndex = 0; leagueIndex < config.Leagues.LeagueOrder.Count; leagueIndex++)
         {
+            var tier = config.Leagues.LeagueOrder[leagueIndex];
             var league = new LeagueState { Tier = tier };
             world.Leagues[tier] = league;
+            var usedNames = new HashSet<string>(StringComparer.Ordinal);
+            var aiIndexInLeague = 0;
 
             for (var divisionIndex = 0; divisionIndex < config.Leagues.DivisionsPerLeague; divisionIndex++)
             {
@@ -72,14 +81,19 @@ public sealed class WorldFactory
                 for (var slot = 0; slot < config.Leagues.PlayersPerDivision; slot++)
                 {
                     var playerId = $"PLY{playerCounter:000}";
+                    var isHuman = playerCounter == 1;
+                    var playerName = isHuman
+                        ? humanPlayerName
+                        : ResolveAiPlayerName(leagueIndex, aiIndexInLeague++, usedNames);
+                    usedNames.Add(playerName);
                     var player = new Player
                     {
                         Id = playerId,
-                        Name = playerCounter == 1 ? humanPlayerName : $"Manager {playerCounter:000}",
+                        Name = playerName,
                         League = tier,
                         DivisionId = divisionId,
                         Cash = config.Economy.StartingCash,
-                        IsHuman = playerCounter == 1,
+                        IsHuman = isHuman,
                     };
                     world.Players[playerId] = player;
                     division.PlayerIds.Add(playerId);
@@ -92,6 +106,28 @@ public sealed class WorldFactory
                 }
             }
         }
+    }
+
+    private static string ResolveAiPlayerName(int leagueIndex, int aiIndexInLeague, ISet<string> usedNames)
+    {
+        var startIndex = (leagueIndex * 5) % AiNamePool.Length;
+        for (var offset = 0; offset < AiNamePool.Length; offset++)
+        {
+            var candidate = AiNamePool[(startIndex + aiIndexInLeague + offset) % AiNamePool.Length];
+            if (usedNames.Add(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        var baseName = AiNamePool[(startIndex + aiIndexInLeague) % AiNamePool.Length];
+        var suffix = 2;
+        while (!usedNames.Add($"{baseName} {suffix}"))
+        {
+            suffix++;
+        }
+
+        return $"{baseName} {suffix}";
     }
 
     private void BootstrapCollections(World world, int seed)

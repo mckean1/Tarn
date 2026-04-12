@@ -1,4 +1,5 @@
 using Tarn.Domain;
+using Tarn.ClientApp.Play.Queries;
 
 namespace Tarn.ClientApp;
 
@@ -63,14 +64,14 @@ public static class CliCommands
     public static void PrintCollection(World world, Player player)
     {
         Console.WriteLine($"Collection for {player.Name}");
-        foreach (var group in player.Collection
-                     .OrderBy(card => world.GetLatestDefinition(card.CardId).Type)
-                     .ThenBy(card => world.GetLatestDefinition(card.CardId).Rarity)
-                     .ThenBy(card => world.GetLatestDefinition(card.CardId).Name, StringComparer.Ordinal)
-                     .GroupBy(card => card.CardId, StringComparer.Ordinal))
+        foreach (var group in CardDisplayGrouper.GroupOwnedCards(world, player.Collection))
         {
-            var definition = world.GetLatestDefinition(group.Key);
-            Console.WriteLine($"{definition.Name,-24} {definition.Type,-8} {definition.Rarity,-10} x{group.Count()} [{string.Join(", ", group.Select(card => card.InstanceId))}]");
+            var definition = world.GetLatestDefinition(group.CardId);
+            var instanceIds = player.Collection
+                .Where(card => string.Equals(card.CardId, group.CardId, StringComparison.Ordinal))
+                .Select(card => card.InstanceId)
+                .OrderBy(id => id, StringComparer.Ordinal);
+            Console.WriteLine($"{definition.Name,-24} {definition.Type,-8} {definition.Rarity,-10} x{group.Count} [{string.Join(", ", instanceIds)}]");
         }
     }
 
@@ -88,10 +89,11 @@ public static class CliCommands
 
                 var champion = world.GetLatestDefinition(player.Collection.First(card => card.InstanceId == player.ActiveDeck.ChampionInstanceId).CardId);
                 Console.WriteLine($"Champion: {champion.Name}");
-                foreach (var instanceId in player.ActiveDeck.NonChampionInstanceIds)
+                var cardIds = player.ActiveDeck.NonChampionInstanceIds
+                    .Select(instanceId => player.Collection.First(entry => entry.InstanceId == instanceId).CardId);
+                foreach (var group in CardDisplayGrouper.GroupCardIds(world, cardIds))
                 {
-                    var card = world.GetLatestDefinition(player.Collection.First(entry => entry.InstanceId == instanceId).CardId);
-                    Console.WriteLine($"- {card.Name} ({instanceId})");
+                    Console.WriteLine($"- {group.Name} x{group.Count}");
                 }
                 break;
             case "auto":

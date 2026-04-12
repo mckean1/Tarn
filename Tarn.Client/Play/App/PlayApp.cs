@@ -91,17 +91,26 @@ public sealed class PlayApp
 
     private void HandleModal(InputAction action)
     {
-        if (action == InputAction.Back || action == InputAction.Select)
+        if (action == InputAction.Back)
         {
             state.Modal = null;
-            state.MessageBar = new MessageBarState(MessageSeverity.Info, "Closed.");
+            state.MessageBar = new MessageBarState(MessageSeverity.Info, "Cancelled.");
             frameRedrawTracker.Invalidate();
             return;
         }
 
-        if (action == InputAction.Confirm)
+        if (action == InputAction.Confirm || action == InputAction.Select)
         {
-            actionExecutor.ExecutePending(state);
+            if (state.Modal?.Kind == ModalKind.Confirmation)
+            {
+                actionExecutor.ExecutePending(state);
+            }
+            else
+            {
+                state.Modal = null;
+                state.MessageBar = new MessageBarState(MessageSeverity.Info, "Closed.");
+                frameRedrawTracker.Invalidate();
+            }
         }
     }
 
@@ -233,7 +242,7 @@ public sealed class PlayApp
 
     private void WriteFrame(string frame)
     {
-        var lines = FrameNormalizer.NormalizeLines(frame, state.WindowWidth, state.WindowHeight);
+        var lines = FrameNormalizer.NormalizeLinesToViewport(frame, state.WindowWidth, state.WindowHeight);
         for (var row = 0; row < lines.Count; row++)
         {
             TrySetCursorPosition(0, row);

@@ -126,7 +126,7 @@ public sealed class ActionExecutor
             .Select(card =>
             {
                 var definition = state.World.GetLatestDefinition(card.CardId);
-                return new PackRevealCard(definition.Name, definition.Rarity.ToString(), !beforeIds.Contains(card.CardId));
+                return new PackRevealCard(definition.Id, definition.Name, definition.Type, definition.Rarity, !beforeIds.Contains(card.CardId));
             })
             .ToList();
 

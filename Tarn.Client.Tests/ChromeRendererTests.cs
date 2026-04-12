@@ -45,6 +45,41 @@ public sealed class ChromeRendererTests
     }
 
     [Fact]
+    public void CollectionFooterKeepsBrowseControlsInFooterLayer()
+    {
+        var output = FooterRenderer.Render(ScreenId.Collection, 80);
+
+        Assert.Contains("↑↓ Move", output);
+        Assert.Contains("←→ Filter", output);
+        Assert.Contains("Enter Sort", output);
+        Assert.Contains("Esc Back", output);
+        Assert.Contains("? Help", output);
+    }
+
+    [Fact]
+    public void DeckFooterKeepsAutoBuildActionInFooterLayer()
+    {
+        var output = FooterRenderer.Render(ScreenId.Deck, 80);
+
+        Assert.Contains("↑↓ Move", output);
+        Assert.Contains("Enter Auto-build", output);
+        Assert.Contains("Esc Back", output);
+        Assert.Contains("? Help", output);
+    }
+
+    [Fact]
+    public void CollectorFooterKeepsTabControlsConcise()
+    {
+        var output = FooterRenderer.Render(ScreenId.Collector, 80);
+
+        Assert.Contains("↑↓ Move", output);
+        Assert.Contains("←→ Tabs", output);
+        Assert.Contains("Enter Confirm", output);
+        Assert.Contains("Esc Back", output);
+        Assert.Contains("? Help", output);
+    }
+
+    [Fact]
     public void MatchCenterFooterUsesBattleFocusedControls()
     {
         var output = FooterRenderer.Render(ScreenId.MatchCenter, 80);
@@ -122,7 +157,7 @@ public sealed class ChromeRendererTests
         Assert.Contains("├", plainOutput);
         Assert.Contains("└", plainOutput);
         Assert.Equal(state.WindowHeight, lines.Length);
-        Assert.All(lines.Take(state.WindowHeight), line => Assert.Equal(state.WindowWidth, AnsiUtility.GetVisibleLength(line)));
+        Assert.All(lines.Take(state.WindowHeight), line => Assert.Equal(FrameNormalizer.GetDrawableWidth(state.WindowWidth), AnsiUtility.GetVisibleLength(line)));
         Assert.StartsWith("┌", lines[0]);
         Assert.StartsWith("├", lines[2]);
         Assert.StartsWith("├", lines[^4]);
@@ -146,8 +181,8 @@ public sealed class ChromeRendererTests
 
         Assert.Equal(20, narrow.Length);
         Assert.Equal(24, wide.Length);
-        Assert.All(narrow, line => Assert.Equal(90, AnsiUtility.GetVisibleLength(line)));
-        Assert.All(wide, line => Assert.Equal(110, AnsiUtility.GetVisibleLength(line)));
+        Assert.All(narrow, line => Assert.Equal(FrameNormalizer.GetDrawableWidth(90), AnsiUtility.GetVisibleLength(line)));
+        Assert.All(wide, line => Assert.Equal(FrameNormalizer.GetDrawableWidth(110), AnsiUtility.GetVisibleLength(line)));
     }
 
     private static AppState BuildState()

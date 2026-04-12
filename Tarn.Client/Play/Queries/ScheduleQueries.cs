@@ -63,7 +63,7 @@ public sealed class ScheduleQueries
             $"Replay: {(replayAvailable ? "Available" : "Not available")}",
             match.Result is null
                 ? "Result: Not played"
-                : $"Result: {FormatPlayerName(world, humanPlayerId, match.Result.WinnerPlayerId)} won {match.Result.WinnerGameWins}-{match.Result.LoserGameWins}",
+                : $"Result: {PlayerNameFormatter.Format(world, humanPlayerId, match.Result.WinnerPlayerId)} won {match.Result.WinnerGameWins}-{match.Result.LoserGameWins}",
             IsPlayerFixture(match, humanPlayerId) ? "Focus: Your match" : "Focus: League fixture",
             replayAvailable ? "Action: Press Enter to open replay." : "Action: Replay unlocks when the match is complete.",
         };
@@ -74,10 +74,7 @@ public sealed class ScheduleQueries
         match.HomePlayerId == humanPlayerId || match.AwayPlayerId == humanPlayerId;
 
     private static string FormatPairing(World world, string humanPlayerId, Match match) =>
-        $"{FormatPlayerName(world, humanPlayerId, match.HomePlayerId)} vs {FormatPlayerName(world, humanPlayerId, match.AwayPlayerId)}";
-
-    private static string FormatPlayerName(World world, string humanPlayerId, string playerId) =>
-        playerId == humanPlayerId ? "You" : world.Players[playerId].Name;
+        $"{PlayerNameFormatter.Format(world, humanPlayerId, match.HomePlayerId)} vs {PlayerNameFormatter.Format(world, humanPlayerId, match.AwayPlayerId)}";
 
     private static string FormatStatus(World world, Match match)
     {

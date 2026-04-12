@@ -20,7 +20,7 @@ public static class ModalRenderer
         var footer = modal.Kind switch
         {
             ModalKind.Help => "Enter/Esc closes this overlay.",
-            ModalKind.Confirmation => "Y confirms. Esc cancels.",
+            ModalKind.Confirmation => "Enter/Y Confirm | Esc Cancel",
             ModalKind.PackReveal => "Enter or Esc returns to the shop.",
             _ => string.Empty,
         };

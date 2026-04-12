@@ -7,11 +7,16 @@ public sealed class WeekSummaryQueries
 {
     public WeekSummaryViewModel BuildDefault() =>
         new(
-            "No Week Summary Yet",
+            "No Summary Available",
+            "Advance the week from Dashboard to generate the next campaign report.",
             [
-                "Advance the week from Dashboard to generate a fresh summary.",
-                "This screen will become the landing page after each mutation.",
+                "After each week resolves, this screen will show your result, rewards, and notable updates.",
+                "Replay access appears here once your latest match has been recorded.",
             ],
+            [
+                "Return to Dashboard when you are ready to progress the season.",
+            ],
+            false,
             null,
             ["Return to Dashboard"]);
 
@@ -26,25 +31,88 @@ public sealed class WeekSummaryQueries
             .Where(match => match.Week == previousWeek && (match.HomePlayerId == humanPlayerId || match.AwayPlayerId == humanPlayerId))
             .FirstOrDefault();
         var replayMatchId = completedMatch?.Result is not null ? completedMatch.Id : null;
-        var lines = new List<string>
+        var highlights = new List<string>
         {
-            $"Completed Year {previousYear}, Week {previousWeek}.",
-            completedMatch?.Result is null ? "Your match is still pending." : FormatPlayerResult(world, humanPlayerId, completedMatch),
-            $"Record: {previousWins}-{previousLosses} -> {standing.Wins}-{standing.Losses}",
-            $"Rank: {FormatSignedDelta(previousRank - currentRank)} ({currentRank} now)",
-            $"Cash: {FormatSignedDelta(player.Cash - previousCash)} ({player.Cash} total)",
-            $"Collector refreshed for week {world.CollectorInventory.RefreshedWeek}.",
+            completedMatch?.Result is null ? "Result: Fixture still pending resolution." : $"Result: {FormatPlayerResult(world, humanPlayerId, completedMatch)}",
+            $"Record: {previousWins}-{previousLosses} → {standing.Wins}-{standing.Losses}",
+            $"Rank: {previousRank} → {currentRank}",
+            $"Cash: {previousCash} → {player.Cash} ({FormatSignedDelta(player.Cash - previousCash)})",
         };
+
+        var notes = new List<string>
+        {
+            $"Collector refreshed for Week {world.CollectorInventory.RefreshedWeek}: {world.CollectorInventory.Singles.Count} singles and {world.CollectorInventory.Packs.Count} packs available.",
+        };
+
+        if (BuildMarketOutcomeNote(world, humanPlayerId, previousWeek) is { } marketNote)
+        {
+            notes.Add(marketNote);
+        }
+
+        if (replayMatchId is not null)
+        {
+            notes.Add("Replay available from Week Summary or Match Center.");
+        }
+
         var actions = replayMatchId is null ? new[] { "Return to Dashboard" } : new[] { "Open Replay", "Return to Dashboard" };
-        return new WeekSummaryViewModel($"Week {previousWeek} Complete", lines, replayMatchId, actions);
+        return new WeekSummaryViewModel(
+            $"Week {previousWeek} Complete",
+            $"Year {previousYear} · Week {previousWeek} · {player.League} League · Cash {player.Cash}",
+            highlights,
+            notes,
+            true,
+            replayMatchId,
+            actions);
     }
 
     public static string FormatSignedDelta(int value) => value > 0 ? $"+{value}" : value.ToString();
+
+    private static string? BuildMarketOutcomeNote(World world, string humanPlayerId, int previousWeek)
+    {
+        var player = world.Players[humanPlayerId];
+        var sellerSale = world.MarketListings
+            .Where(listing => listing.ExpiresWeek == previousWeek)
+            .Where(listing => string.Equals(listing.SellerPlayerId, humanPlayerId, StringComparison.Ordinal))
+            .OrderBy(listing => listing.Id, StringComparer.Ordinal)
+            .FirstOrDefault(listing => listing.Status == ListingStatus.Sold);
+        if (sellerSale is not null)
+        {
+            var saleAmount = sellerSale.Bids
+                .OrderByDescending(bid => bid.Amount)
+                .ThenBy(bid => bid.PlayerId, StringComparer.Ordinal)
+                .Select(bid => bid.Amount)
+                .FirstOrDefault(sellerSale.MinimumBid);
+            return $"Market: Sold {world.GetLatestDefinition(sellerSale.CardId).Name} for {saleAmount}.";
+        }
+
+        var buyerWin = world.MarketListings
+            .Where(listing => listing.ExpiresWeek == previousWeek && listing.Status == ListingStatus.Sold)
+            .Where(listing => !string.Equals(listing.SellerPlayerId, humanPlayerId, StringComparison.Ordinal))
+            .OrderBy(listing => listing.Id, StringComparer.Ordinal)
+            .FirstOrDefault(listing => listing.CardInstanceId is not null && player.Collection.Any(card => string.Equals(card.InstanceId, listing.CardInstanceId, StringComparison.Ordinal)));
+        if (buyerWin is not null)
+        {
+            var winningBid = buyerWin.Bids.FirstOrDefault(bid => string.Equals(bid.PlayerId, humanPlayerId, StringComparison.Ordinal));
+            var priceText = winningBid is null ? string.Empty : $" for {winningBid.Amount}";
+            return $"Market: Won {world.GetLatestDefinition(buyerWin.CardId).Name}{priceText}.";
+        }
+
+        var expiredListing = world.MarketListings
+            .Where(listing => listing.ExpiresWeek == previousWeek)
+            .Where(listing => string.Equals(listing.SellerPlayerId, humanPlayerId, StringComparison.Ordinal))
+            .OrderBy(listing => listing.Id, StringComparer.Ordinal)
+            .FirstOrDefault(listing => listing.Status == ListingStatus.Expired);
+        return expiredListing is null
+            ? null
+            : $"Market: {world.GetLatestDefinition(expiredListing.CardId).Name} expired without a sale.";
+    }
 
     private static string FormatPlayerResult(World world, string humanPlayerId, Match match)
     {
         var won = match.Result!.WinnerPlayerId == humanPlayerId;
         var opponentId = match.HomePlayerId == humanPlayerId ? match.AwayPlayerId : match.HomePlayerId;
-        return $"{(won ? "Victory" : "Defeat")} vs {world.Players[opponentId].Name} {match.Result.WinnerGameWins}-{match.Result.LoserGameWins}";
+        var playerWins = won ? match.Result.WinnerGameWins : match.Result.LoserGameWins;
+        var opponentWins = won ? match.Result.LoserGameWins : match.Result.WinnerGameWins;
+        return $"{(won ? "Won" : "Lost")} vs {PlayerNameFormatter.Format(world, humanPlayerId, opponentId)} ({playerWins}-{opponentWins})";
     }
 }

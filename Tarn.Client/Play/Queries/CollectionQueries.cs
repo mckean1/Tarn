@@ -32,39 +32,41 @@ public sealed class CollectionQueries
                 .GroupBy(id => id, StringComparer.Ordinal)
                 .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
 
-        var grouped = player.Collection
-            .GroupBy(card => card.CardId, StringComparer.Ordinal)
+        var grouped = CardDisplayGrouper.GroupOwnedCards(world, player.Collection)
             .Select(group =>
             {
-                var definition = world.GetLatestDefinition(group.Key);
-                activeDeckCounts.TryGetValue(group.Key, out var used);
+                var definition = world.GetLatestDefinition(group.CardId);
+                activeDeckCounts.TryGetValue(group.CardId, out var used);
                 return new CollectionRowViewModel(
                     definition.Id,
                     definition.Name,
-                    definition.Type.ToString(),
-                    definition.Rarity.ToString(),
-                    group.Count(),
+                    definition.Type,
+                    definition.Rarity,
+                    group.Count,
                     used,
-                    definition.RulesText,
-                    CardTextFormatter.BuildStats(definition));
+                    CardTextFormatter.BuildCollectionStats(definition),
+                    CardTextFormatter.BuildKeywordSummary(definition.Keywords),
+                    string.IsNullOrWhiteSpace(definition.RulesText) ? "No rules text." : definition.RulesText);
             })
             .Where(row => MatchesFilter(row, filter))
             .ToList();
 
         grouped = Sort(grouped, sort).ToList();
         var clampedIndex = grouped.Count == 0 ? 0 : Math.Clamp(selectedIndex, 0, grouped.Count - 1);
-        var detail = grouped.Count == 0 ? null : grouped[clampedIndex];
-        return new CollectionViewModel(filter, sort, clampedIndex, grouped, detail);
+        var detail = grouped.Count == 0
+            ? null
+            : BuildDetail(grouped[clampedIndex]);
+        return new CollectionViewModel(GetFilterLabel(filter), GetSortLabel(sort), clampedIndex, grouped, detail);
     }
 
     public static IEnumerable<CollectionRowViewModel> Sort(IEnumerable<CollectionRowViewModel> rows, CollectionSort sort)
     {
         return sort switch
         {
-            CollectionSort.Type => rows.OrderBy(row => row.Type).ThenBy(row => row.Name, StringComparer.Ordinal),
-            CollectionSort.Rarity => rows.OrderBy(row => row.Rarity).ThenBy(row => row.Name, StringComparer.Ordinal),
-            CollectionSort.OwnedCount => rows.OrderByDescending(row => row.OwnedCount).ThenBy(row => row.Name, StringComparer.Ordinal),
-            _ => rows.OrderBy(row => row.Name, StringComparer.Ordinal),
+            CollectionSort.Type => rows.OrderBy(row => CardDisplayGrouper.GetTypeSortOrder(row.Type)).ThenBy(row => CardDisplayGrouper.GetRaritySortOrder(row.Rarity)).ThenBy(row => row.Name, StringComparer.Ordinal),
+            CollectionSort.Rarity => rows.OrderBy(row => CardDisplayGrouper.GetRaritySortOrder(row.Rarity)).ThenBy(row => CardDisplayGrouper.GetTypeSortOrder(row.Type)).ThenBy(row => row.Name, StringComparer.Ordinal),
+            CollectionSort.OwnedCount => rows.OrderByDescending(row => row.OwnedCount).ThenBy(row => CardDisplayGrouper.GetTypeSortOrder(row.Type)).ThenBy(row => CardDisplayGrouper.GetRaritySortOrder(row.Rarity)).ThenBy(row => row.Name, StringComparer.Ordinal),
+            _ => rows.OrderBy(row => CardDisplayGrouper.GetTypeSortOrder(row.Type)).ThenBy(row => CardDisplayGrouper.GetRaritySortOrder(row.Rarity)).ThenBy(row => row.Name, StringComparer.Ordinal),
         };
     }
 
@@ -72,29 +74,69 @@ public sealed class CollectionQueries
     {
         return filter switch
         {
-            CollectionFilter.Units => row.Type == nameof(CardType.Unit),
-            CollectionFilter.Spells => row.Type == nameof(CardType.Spell),
-            CollectionFilter.Counters => row.Type == nameof(CardType.Counter),
-            CollectionFilter.Champions => row.Type == nameof(CardType.Champion),
+            CollectionFilter.Units => row.Type == CardType.Unit,
+            CollectionFilter.Spells => row.Type == CardType.Spell,
+            CollectionFilter.Counters => row.Type == CardType.Counter,
+            CollectionFilter.Champions => row.Type == CardType.Champion,
             CollectionFilter.OwnedOnly => row.OwnedCount > 0,
             _ => true,
         };
     }
+
+    public static string GetFilterLabel(CollectionFilter filter) => filter switch
+    {
+        CollectionFilter.OwnedOnly => "Owned Only",
+        _ => filter.ToString(),
+    };
+
+    public static string GetSortLabel(CollectionSort sort) => sort switch
+    {
+        CollectionSort.Name => "Type / Rarity / Name",
+        CollectionSort.OwnedCount => "Owned Count",
+        _ => sort.ToString(),
+    };
+
+    private static CollectionDetailViewModel BuildDetail(CollectionRowViewModel row)
+        => new(
+            row.Name,
+            row.Type.ToString(),
+            row.Rarity.ToString(),
+            row.StatsText,
+            row.OwnedCount,
+            row.UsedInDeckCount,
+            row.KeywordsText,
+            row.RulesText);
 }
 
 public sealed record CollectionViewModel(
-    CollectionFilter Filter,
-    CollectionSort Sort,
+    string FilterLabel,
+    string SortLabel,
     int SelectedIndex,
     IReadOnlyList<CollectionRowViewModel> Rows,
-    CollectionRowViewModel? Detail);
+    CollectionDetailViewModel? Detail);
 
 public sealed record CollectionRowViewModel(
     string CardId,
     string Name,
-    string Type,
-    string Rarity,
+    CardType Type,
+    CardRarity Rarity,
     int OwnedCount,
     int UsedInDeckCount,
-    string RulesText,
-    string StatsText);
+    string? StatsText,
+    string KeywordsText,
+    string RulesText)
+{
+    public string DisplayName => CardDisplayGrouper.FormatDisplayName(Name, OwnedCount);
+    public string TypeLabel => Type.ToString();
+    public string RarityLabel => Rarity.ToString();
+}
+
+public sealed record CollectionDetailViewModel(
+    string Name,
+    string Type,
+    string Rarity,
+    string? StatsText,
+    int OwnedCount,
+    int UsedInDeckCount,
+    string KeywordsText,
+    string RulesText);

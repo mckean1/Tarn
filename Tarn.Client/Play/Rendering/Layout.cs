@@ -57,8 +57,8 @@ public sealed class Layout
 
     public Layout(int width, int height)
     {
-        Width = Math.Max(40, width);
-        Height = Math.Max(12, height);
+        Width = Math.Max(0, width);
+        Height = Math.Max(0, height);
     }
 
     public int Width { get; }
@@ -66,7 +66,7 @@ public sealed class Layout
     public bool IsNarrow => Width < 100;
     public bool IsVeryNarrow => Width < 72;
     public Rect Header => new(0, 0, Width, HeaderHeight);
-    public Rect Body => new(0, HeaderHeight, Width, Math.Max(3, Height - HeaderHeight - MessageBarHeight - FooterHeight));
+    public Rect Body => new(0, HeaderHeight, Width, Math.Max(0, Height - HeaderHeight - MessageBarHeight - FooterHeight));
     public Rect MessageBar => new(0, Body.Bottom, Width, MessageBarHeight);
     public Rect Footer => new(0, MessageBar.Bottom, Width, FooterHeight);
 

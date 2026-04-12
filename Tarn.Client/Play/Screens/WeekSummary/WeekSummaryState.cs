@@ -8,6 +8,9 @@ public sealed class WeekSummaryState
 
 public sealed record WeekSummaryViewModel(
     string Title,
-    IReadOnlyList<string> Lines,
+    string Subtitle,
+    IReadOnlyList<string> Highlights,
+    IReadOnlyList<string> Notes,
+    bool IsGenerated,
     string? ReplayMatchId,
     IReadOnlyList<string> Actions);

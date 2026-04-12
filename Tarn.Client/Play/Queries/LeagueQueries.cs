@@ -19,7 +19,7 @@ public sealed class LeagueQueries
             return new LeagueRowViewModel(
                 entry.DeckId,
                 entry.LeagueRank.ToString(),
-                player.Name,
+                PlayerNameFormatter.Format(world, humanPlayerId, entry.DeckId),
                 $"{entry.Wins}-{entry.Losses}",
                 entry.MatchPoints.ToString(),
                 entry.GameDifferential.ToString(),
@@ -28,11 +28,11 @@ public sealed class LeagueQueries
         }).ToList();
 
         var clampedIndex = rows.Count == 0 ? 0 : Math.Clamp(selectedIndex, 0, rows.Count - 1);
-        var detail = rows.Count == 0 ? new LeagueDetailViewModel("No standings", ["No league data is available."], "No streak", "0", "0") : BuildDetail(world, league, rows[clampedIndex].PlayerId);
+        var detail = rows.Count == 0 ? new LeagueDetailViewModel("No standings", ["No league data is available."], "No streak", "0", "0") : BuildDetail(world, humanPlayerId, league, rows[clampedIndex].PlayerId);
         return new LeagueViewModel(league.ToString(), leagueIndex - baseIndex, clampedIndex, rows, detail);
     }
 
-    private LeagueDetailViewModel BuildDetail(World world, LeagueTier league, string playerId)
+    private LeagueDetailViewModel BuildDetail(World world, string humanPlayerId, LeagueTier league, string playerId)
     {
         var ranked = StandingsCalculator.Rank(world.Season.Standings.Values.Where(entry => entry.League == league).ToList()).ToList();
         var selected = ranked.First(entry => entry.DeckId == playerId);
@@ -43,7 +43,7 @@ public sealed class LeagueQueries
             .OrderByDescending(match => match.Week)
             .ThenByDescending(match => match.FixturePriority)
             .Take(3)
-            .Select(match => FormatRecent(world, playerId, match))
+            .Select(match => FormatRecent(world, humanPlayerId, playerId, match))
             .ToList();
         if (recent.Count == 0)
         {
@@ -58,7 +58,7 @@ public sealed class LeagueQueries
             : "Bottom edge";
 
         return new LeagueDetailViewModel(
-            world.Players[playerId].Name,
+            PlayerNameFormatter.Format(world, humanPlayerId, playerId),
             recent,
             CalculateStreak(world, playerId),
             (leaderPoints - selected.MatchPoints).ToString(),
@@ -95,9 +95,10 @@ public sealed class LeagueQueries
         return $"{(first ? "Won" : "Lost")} {count} straight";
     }
 
-    private static string FormatRecent(World world, string playerId, Match match)
+    private static string FormatRecent(World world, string humanPlayerId, string playerId, Match match)
     {
-        var opponent = world.Players[match.HomePlayerId == playerId ? match.AwayPlayerId : match.HomePlayerId].Name;
+        var opponentId = match.HomePlayerId == playerId ? match.AwayPlayerId : match.HomePlayerId;
+        var opponent = PlayerNameFormatter.Format(world, humanPlayerId, opponentId);
         return $"{(match.Result!.WinnerPlayerId == playerId ? "Beat" : "Lost to")} {opponent} in W{match.Week}";
     }
 }

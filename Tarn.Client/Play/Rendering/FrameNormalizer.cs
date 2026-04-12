@@ -2,6 +2,16 @@ namespace Tarn.ClientApp.Play.Rendering;
 
 public static class FrameNormalizer
 {
+    public static int GetDrawableWidth(int viewportWidth) => Math.Max(0, viewportWidth - 1);
+
+    public static int GetDrawableHeight(int viewportHeight) => Math.Max(0, viewportHeight);
+
+    public static string NormalizeToViewport(string frame, int viewportWidth, int viewportHeight) =>
+        Normalize(frame, GetDrawableWidth(viewportWidth), GetDrawableHeight(viewportHeight));
+
+    public static IReadOnlyList<string> NormalizeLinesToViewport(string? frame, int viewportWidth, int viewportHeight) =>
+        NormalizeLines(frame, GetDrawableWidth(viewportWidth), GetDrawableHeight(viewportHeight));
+
     public static string Normalize(string frame, int width, int height) =>
         string.Join(Environment.NewLine, NormalizeLines(frame, width, height));
 

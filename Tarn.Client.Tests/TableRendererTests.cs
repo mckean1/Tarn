@@ -21,6 +21,28 @@ public sealed class TableRendererTests
     }
 
     [Fact]
+    public void BuildRowSupportsRightAlignedColumnsWithCustomSeparators()
+    {
+        var row = TableRenderer.BuildRow(
+        [
+            "Extremely Long Card Name",
+            "Champion",
+            "Legendary",
+            "12",
+        ],
+        [
+            new TableColumn { Header = "Name", Width = 20 },
+            new TableColumn { Header = "Type", Width = 10 },
+            new TableColumn { Header = "Rarity", Width = 10 },
+            new TableColumn { Header = "Owned", Width = 5, Alignment = TableCellAlignment.Right },
+        ],
+        columnSeparator: "  ");
+
+        Assert.Equal("Extremely Long Card.  Champion    Legendary      12", row);
+        Assert.Equal(51, AnsiUtility.GetVisibleLength(row));
+    }
+
+    [Fact]
     public void InteractiveRowAppliesSharedSelectionEmphasis()
     {
         var selected = ScreenText.InteractiveRow(true, "Advance Week");

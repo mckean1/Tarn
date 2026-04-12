@@ -87,10 +87,10 @@ public static class MatchCenterRenderer
         var lines = new List<string>
         {
             Layout.Truncate(replay.Title, rect.Width),
-            Layout.Truncate($"Round: {snapshot.RoundLabel}  ·  Initiative: {snapshot.InitiativeLabel}  ·  State: {snapshot.BattleStateLabel}", rect.Width),
+            Layout.Truncate($"Round {snapshot.RoundLabel}  ·  {snapshot.InitiativeLabel} initiative  ·  {snapshot.BattleStateLabel}", rect.Width),
         };
 
-        var replayStatus = $"Position: {FormatReplayPosition(state.MatchCenter.CurrentEventIndex, replay.EventLog.Count)}  ·  Autoplay: {(state.MatchCenter.AutoplayEnabled ? "On" : "Off")}";
+        var replayStatus = $"Step: {FormatReplayPosition(state.MatchCenter.CurrentEventIndex, replay.EventLog.Count)}  ·  Autoplay: {(state.MatchCenter.AutoplayEnabled ? "On" : "Off")}";
         if (string.Equals(snapshot.BattleStateLabel, "Complete", StringComparison.Ordinal))
         {
             replayStatus += $"  ·  Result: {replay.Result}";
@@ -106,13 +106,12 @@ public static class MatchCenterRenderer
         AppendCombatant(lines, snapshot.Home, snapshot.InitiativeLabel);
         lines.Add(string.Empty);
         AppendCombatant(lines, snapshot.Away, snapshot.InitiativeLabel);
-        lines.Add(string.Empty);
-        lines.Add(ScreenText.Secondary("Replay Info"));
-        lines.AddRange(replay.ReplayInfoLines);
-        lines.Add($"Initial initiative: {replay.Initiative}");
-        if (string.Equals(snapshot.BattleStateLabel, "Complete", StringComparison.Ordinal))
+
+        if (ShouldShowReplayInfo(snapshot))
         {
-            lines.Add($"Result: {replay.Result}");
+            lines.Add(string.Empty);
+            lines.Add(ScreenText.Secondary("Replay"));
+            lines.AddRange(replay.ReplayInfoLines);
         }
 
         return lines.Take(Math.Max(1, rect.Height)).ToList();
@@ -131,45 +130,100 @@ public static class MatchCenterRenderer
 
     private static IReadOnlyList<string> BuildBattlefieldLines(MatchReplayViewModel replay, RoundSnapshotViewModel snapshot, Rect rect)
     {
-        var lines = new List<string>
-        {
-            ScreenText.Secondary("Home board"),
-        };
-        lines.AddRange(snapshot.HomeBoardLines);
+        var lines = new List<string>();
+        AppendBoardSection(lines, "Home Board", snapshot.HomeBoardLines);
         lines.Add(string.Empty);
-        lines.Add(ScreenText.Secondary("Away board"));
-        lines.AddRange(snapshot.AwayBoardLines);
+        AppendBoardSection(lines, "Away Board", snapshot.AwayBoardLines);
         lines.Add(string.Empty);
         lines.Add(ScreenText.Secondary("Counters"));
         lines.Add($"Home: {snapshot.HomeCounterSummary}");
         lines.Add($"Away: {snapshot.AwayCounterSummary}");
-        if (string.Equals(snapshot.BattleStateLabel, "Complete", StringComparison.Ordinal))
-        {
-            lines.Add(string.Empty);
-            lines.Add($"Result: {replay.Result}");
-        }
 
         return lines.Take(Math.Max(1, rect.Height)).ToList();
     }
 
     private static IReadOnlyList<string> BuildEventLogLines(AppState state, MatchReplayViewModel replay, Rect rect)
     {
-        if (replay.EventLog.Count == 0)
+        var visibleGroups = BuildVisibleEventGroups(replay.EventLog);
+        if (visibleGroups.Count == 0)
         {
             return ["Replay log unavailable."];
         }
 
         var visibleRows = Math.Max(1, rect.Height);
         var selectedIndex = Math.Clamp(state.MatchCenter.CurrentEventIndex, 0, replay.EventLog.Count - 1);
-        var start = Math.Clamp(selectedIndex - (visibleRows / 2), 0, Math.Max(0, replay.EventLog.Count - visibleRows));
-        var end = Math.Min(replay.EventLog.Count, start + visibleRows);
+        var selectedGroupIndex = ResolveSelectedGroupIndex(visibleGroups, selectedIndex);
+        var start = Math.Clamp(selectedGroupIndex - (visibleRows / 2), 0, Math.Max(0, visibleGroups.Count - visibleRows));
+        var end = Math.Min(visibleGroups.Count, start + visibleRows);
         var lines = new List<string>(end - start);
         for (var index = start; index < end; index++)
         {
-            lines.Add(ScreenText.InteractiveRow(index == selectedIndex, replay.EventLog[index], selectedMarker: ">", unselectedMarker: " "));
+            lines.Add(ScreenText.InteractiveRow(index == selectedGroupIndex, visibleGroups[index].Text, selectedMarker: "▶", unselectedMarker: " "));
         }
 
         return lines;
+    }
+
+    private static bool ShouldShowReplayInfo(RoundSnapshotViewModel snapshot)
+        => snapshot.RoundNumber <= 0 || string.Equals(snapshot.BattleStateLabel, "Opening", StringComparison.Ordinal);
+
+    private static void AppendBoardSection(ICollection<string> lines, string label, IReadOnlyList<string> boardLines)
+    {
+        if (boardLines.Count == 0 || (boardLines.Count == 1 && string.Equals(boardLines[0], "empty", StringComparison.OrdinalIgnoreCase)))
+        {
+            lines.Add($"{label}: empty");
+            return;
+        }
+
+        lines.Add(ScreenText.Secondary(label));
+        foreach (var line in boardLines)
+        {
+            lines.Add(line);
+        }
+    }
+
+    private static IReadOnlyList<VisibleReplayGroup> BuildVisibleEventGroups(IReadOnlyList<string> eventLog)
+    {
+        var groups = new List<VisibleReplayGroup>();
+        for (var index = 0; index < eventLog.Count; index++)
+        {
+            var text = eventLog[index].Trim();
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                continue;
+            }
+
+            if (groups.Count > 0 && string.Equals(groups[^1].Text, text, StringComparison.Ordinal))
+            {
+                groups[^1] = groups[^1] with { EndIndex = index };
+                continue;
+            }
+
+            groups.Add(new VisibleReplayGroup(index, index, text));
+        }
+
+        return groups;
+    }
+
+    private static int ResolveSelectedGroupIndex(IReadOnlyList<VisibleReplayGroup> groups, int selectedIndex)
+    {
+        for (var index = 0; index < groups.Count; index++)
+        {
+            if (selectedIndex >= groups[index].StartIndex && selectedIndex <= groups[index].EndIndex)
+            {
+                return index;
+            }
+        }
+
+        for (var index = groups.Count - 1; index >= 0; index--)
+        {
+            if (groups[index].EndIndex < selectedIndex)
+            {
+                return index;
+            }
+        }
+
+        return 0;
     }
 
     private static string FormatReplayPosition(int currentEventIndex, int eventCount)
@@ -181,4 +235,6 @@ public static class MatchCenterRenderer
 
         return $"{Math.Clamp(currentEventIndex + 1, 1, eventCount)}/{eventCount}";
     }
+
+    private sealed record VisibleReplayGroup(int StartIndex, int EndIndex, string Text);
 }

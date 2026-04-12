@@ -14,6 +14,30 @@ public sealed class CardGenerator
 {
     private static readonly string[] EvergreenKeywords = ["Defender", "Magnet", "Swift", "Ward", "Fury"];
     private static readonly string[] Themes = ["Ash", "Iron", "Bloom", "Storm", "Echo", "Grave", "Radiant", "Null"];
+    private static readonly string[] ChampionNames =
+    [
+        "Veyn, Ember Edge", "Serah, Banner of Motion", "Garruk, Wall Marshal", "Lyra, Coil Herald", "Morcant, Grave Choir",
+        "Selka, Ash Collector", "Noct, Null Regent", "Aster, Chain Custodian", "Toma, Bulwark Leech", "Kael, War Pulse",
+        "Brin, Iron Survivor", "Sable, Echo Cage", "Edda, Last Hearth", "Irix, Spellwake Sage", "Dren, Skybreaker",
+        "Nema, Quiet Mason", "Orren, Pale Warden", "Vale, Lean Season", "Hest, Glass Oath", "Malvek, Ruin Script",
+    ];
+    private static readonly string[] UnitNames =
+    [
+        "Ashen Scout", "Grave Pike", "Lantern Sentry", "Mire Raider", "Iron Vagrant", "Hollow Stalker", "Briar Duelist", "Cinder Wolf", "Marsh Hunter", "Stoneblade Initiate",
+        "Dusk Skirmisher", "Ember Watcher", "Rustshield Guard", "Nightfen Strider", "Thorn Pike Adept", "Pale Banneret", "Rook Outrider", "Soottrail Ranger", "Warden of Cinders", "Blackbriar Sentinel",
+        "Glassmere Keeper", "Coalstep Marauder", "Wisp Lanternbearer", "Fenblade Tracker", "Carrion Herald", "Ashroot Defender", "Gloam Caravaner", "Riftcoil Adept", "Cairn Hound", "Brassleaf Spearhand",
+        "Tinder Shrineguard", "Murk Talon", "Hearth Pike Veteran", "Shadefen Lookout", "Crownless Marshal", "Rime Lantern Fox", "Duskwell Partisan", "Smolder Fenwatch", "Hollow Banner Scout", "Vinehook Trapper",
+        "Ruinpath Sentry", "Ashwake Courier", "Marrow Pike Guard", "Copper Thorn Scout", "Emberfen Duelmaster", "Gravemarch Rider", "Briar Coil Warden", "Lantern Moor Striker", "Iron Moss Reaver", "Sable Road Warden",
+    ];
+    private static readonly string[] SpellNames =
+    [
+        "Iron Rite", "Ember Sigil", "Thorn Lash", "Gravebind", "Ashfall Burst", "Lantern Flare", "Cinder Hex", "March of Thorns", "Quiet Pyre", "Warden's Lesson",
+        "Smoke Omen", "Rook's Gambit", "Mire Invocation", "Coalbrand", "Blackglass Edict", "Ashen Recall", "Lantern Benediction", "Ironwake Pulse", "Veil of Briars", "Gravesoil Offering",
+    ];
+    private static readonly string[] CounterNames =
+    [
+        "Bastion Ward", "Null Brand", "Turn Aside", "Last Denial", "Silent Rebuke", "Ashwall Intercept", "Witchlight Snare", "Halt the Charge", "Mirror Shunt", "Seal the Breach",
+    ];
 
     private readonly TarnConfig config;
 
@@ -181,17 +205,22 @@ public sealed class CardGenerator
 
     private static string BuildName(int setSequence, CardType family, int index)
     {
-        var theme = Themes[(setSequence + index) % Themes.Length];
-        var noun = family switch
+        var baseName = family switch
         {
-            CardType.Champion => "Champion",
-            CardType.Unit => "Unit",
-            CardType.Spell => "Spell",
-            CardType.Counter => "Counter",
-            _ => "Card",
+            CardType.Champion => ChampionNames[index % ChampionNames.Length],
+            CardType.Unit => UnitNames[index % UnitNames.Length],
+            CardType.Spell => SpellNames[index % SpellNames.Length],
+            CardType.Counter => CounterNames[index % CounterNames.Length],
+            _ => "Unnamed Card",
         };
 
-        return $"{theme} {noun} {index + 1}";
+        if (setSequence == 1)
+        {
+            return baseName;
+        }
+
+        var theme = Themes[(setSequence - 1) % Themes.Length];
+        return $"{baseName} of {theme}";
     }
 
     private static BaseTemplate BuildBaseTemplate(CardType family, CardRarity rarity, int index)

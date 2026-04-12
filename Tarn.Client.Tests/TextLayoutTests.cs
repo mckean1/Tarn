@@ -32,4 +32,14 @@ public sealed class TextLayoutTests
         Assert.Equal(5, AnsiUtility.GetVisibleLength(padded));
         Assert.Equal("Go   ", AnsiUtility.StripAnsi(padded));
     }
+
+    [Fact]
+    public void PadVisibleLeftUsesVisibleWidthForAnsiStyledText()
+    {
+        var text = TerminalStyle.BrightWhite + "12" + TerminalStyle.Reset;
+        var padded = TextLayout.PadVisibleLeft(text, 5);
+
+        Assert.Equal(5, AnsiUtility.GetVisibleLength(padded));
+        Assert.Equal("   12", AnsiUtility.StripAnsi(padded));
+    }
 }

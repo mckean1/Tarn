@@ -5,6 +5,17 @@ namespace Tarn.Client.Tests;
 public sealed class FrameNormalizerTests
 {
     [Fact]
+    public void NormalizeToViewportReservesUnsafeLastColumn()
+    {
+        var lines = FrameNormalizer.NormalizeLinesToViewport("ABCDE", 6, 2);
+
+        Assert.Equal(2, lines.Count);
+        Assert.Equal(5, AnsiUtility.GetVisibleLength(lines[0]));
+        Assert.Equal("ABCDE", lines[0]);
+        Assert.Equal("     ", lines[1]);
+    }
+
+    [Fact]
     public void NormalizePadsEachLineToTargetWidth()
     {
         var lines = FrameNormalizer.NormalizeLines("A" + Environment.NewLine + "BBB", 5, 2);

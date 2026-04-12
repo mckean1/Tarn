@@ -6,8 +6,13 @@ namespace Tarn.ClientApp.Play.Queries;
 
 public sealed class MatchReplayQueries
 {
-    private static readonly Regex CardIdPattern = new(@"\b(?:CH|CT|SP|UN)\d{3}\b");
-    private static readonly Regex InstanceIdPattern = new(@"\b[\w-]+-[A-Z]{2}\d{3}-\d+\b");
+    private const string LegacyCardIdPatternText = @"(?:CH|CT|SP|UN)\d{3}";
+    private const string GeneratedCardIdPatternText = @"[A-Z]{3}\d{3}-(?:CH|CT|SP|UN)\d{2}-[A-Z]";
+    private const string CardIdPatternText = $"(?:{GeneratedCardIdPatternText}|{LegacyCardIdPatternText})";
+
+    private static readonly Regex CardIdPattern = new($@"\b{CardIdPatternText}\b");
+    private static readonly Regex InstanceIdPattern = new($@"\b[\w]+-{CardIdPatternText}-\d+\b");
+    private static readonly Regex CardCodeWithNamePattern = new($@"\b{CardIdPatternText}\s+");
     private static readonly Lazy<World> PreviewWorld = new(static () => new WorldFactory().CreateNewWorld(1, "Replay"));
 
     private readonly GameEngine engine = new();
@@ -46,12 +51,18 @@ public sealed class MatchReplayQueries
             world.Players[ResolveInitialPlayerId(fixture)].Name,
             result,
             BuildReplayInfoLines(state),
-            state.ReplayLog.Select(line => PhraseEvent(line, phraseContext)).ToList(),
+            ShapeEventLog(state.ReplayLog, phraseContext).ToList(),
             snapshots);
     }
 
     public static string PhraseEvent(string raw)
         => PhraseEvent(raw, new ReplayPhraseContext("P1", "P2", "Home", "Away", TryResolvePreviewCardName));
+
+    public static IReadOnlyList<string> ShapeEventLog(IEnumerable<string> rawEvents)
+        => ShapeEventLog(rawEvents, new ReplayPhraseContext("P1", "P2", "Home", "Away", TryResolvePreviewCardName)).ToList();
+
+    private static IEnumerable<string> ShapeEventLog(IEnumerable<string> rawEvents, ReplayPhraseContext context)
+        => rawEvents.Select(raw => PhraseEvent(raw, context));
 
     private static string PhraseEvent(string raw, ReplayPhraseContext context)
     {
@@ -78,11 +89,19 @@ public sealed class MatchReplayQueries
             || TryPhraseInitiative(text, context, out championLine)
             || TryPhrasePlay(text, context, out championLine)
             || TryPhraseBattlefieldEntry(text, context, out championLine)
+            || TryPhraseCounterZoneEntry(text, context, out championLine)
+            || TryPhraseCounterCommit(text, context, out championLine)
             || TryPhraseChampionAttack(text, context, out championLine)
             || TryPhraseUnitAttack(text, context, out championLine)
+            || TryPhraseAssignedToDefender(text, context, out championLine)
             || TryPhraseChampionDamage(text, context, out championLine)
             || TryPhraseUnitDamage(text, context, out championLine)
+            || TryPhraseDeathCheck(text, out championLine)
+            || TryPhraseLeavesBattlefield(text, context, out championLine)
             || TryPhraseWinCheck(text, context, out championLine)
+            || TryPhraseCounterResolution(text, context, out championLine)
+            || TryPhrasePreventDamage(text, context, out championLine)
+            || TryPhraseCountered(text, context, out championLine)
             || TryPhraseResolve(text, context, out championLine))
         {
             return championLine;
@@ -205,10 +224,9 @@ public sealed class MatchReplayQueries
     {
         return
         [
-            $"Seed: {state.Seed}",
-            $"Home champion: {state.PlayerOne.Champion.Card.Name}",
-            $"Away champion: {state.PlayerTwo.Champion.Card.Name}",
-            $"Decks: {state.PlayerOne.Deck.MainDeck.Count} vs {state.PlayerTwo.Deck.MainDeck.Count} cards",
+            $"Seed {state.Seed}",
+            $"Champions: {state.PlayerOne.Champion.Card.Name} vs {state.PlayerTwo.Champion.Card.Name}",
+            $"Decks: {state.PlayerOne.Deck.MainDeck.Count} vs {state.PlayerTwo.Deck.MainDeck.Count}",
         ];
     }
 
@@ -226,7 +244,7 @@ public sealed class MatchReplayQueries
         }
 
         var tagText = tags.Count == 0 ? string.Empty : " " + string.Join(" ", tags);
-        return $"[{slot}] {unit.Card.Name} {unit.Attack}/{unit.Health}{tagText}";
+        return $"[{slot}] {unit.Card.Name,-14} {unit.Attack}/{unit.Health}{tagText}";
     }
 
     private static string FormatCounters(IReadOnlyList<CounterState> counters)
@@ -249,15 +267,7 @@ public sealed class MatchReplayQueries
             return false;
         }
 
-        var playerLabel = ResolvePlayerLabel(text[..markerIndex], context);
-        var champion = RemoveCardCodes(text[(markerIndex + marker.Length)..]);
-        var statsIndex = champion.IndexOf(" (", StringComparison.Ordinal);
-        if (statsIndex >= 0)
-        {
-            champion = champion[..statsIndex];
-        }
-
-        result = $"{playerLabel} champion: {champion.Trim()}.";
+        result = "Both champions are ready.";
         return true;
     }
 
@@ -271,7 +281,7 @@ public sealed class MatchReplayQueries
             return false;
         }
 
-        result = $"{ResolvePlayerLabel(text[..markerIndex], context)} deck ready.";
+        result = string.Empty;
         return true;
     }
 
@@ -320,7 +330,7 @@ public sealed class MatchReplayQueries
 
         var playerLabel = ResolvePlayerLabel(text[..markerIndex], context);
         var cardText = RemoveCardCodes(text[(markerIndex + marker.Length)..]).Trim();
-        result = $"{playerLabel} plays {cardText}";
+        result = EnsureSentence($"{playerLabel} plays {cardText}");
         return true;
     }
 
@@ -334,7 +344,38 @@ public sealed class MatchReplayQueries
             return false;
         }
 
-        result = $"{ResolveInstanceLabel(text[..markerIndex], context)} enters as {text[(markerIndex + marker.Length)..]}";
+        result = EnsureSentence($"{ResolveInstanceLabel(text[..markerIndex], context)} enters as {text[(markerIndex + marker.Length)..]}");
+        return true;
+    }
+
+    private static bool TryPhraseCounterZoneEntry(string text, ReplayPhraseContext context, out string result)
+    {
+        const string marker = " enters the Counter Zone.";
+        if (!text.EndsWith(marker, StringComparison.Ordinal))
+        {
+            result = string.Empty;
+            return false;
+        }
+
+        result = $"{ResolveInstanceLabel(text[..^marker.Length], context)} is set as a counter.";
+        return true;
+    }
+
+    private static bool TryPhraseCounterCommit(string text, ReplayPhraseContext context, out string result)
+    {
+        const string marker = " commits from the Counter Zone targeting ";
+        var markerIndex = text.IndexOf(marker, StringComparison.Ordinal);
+        if (markerIndex < 0)
+        {
+            result = string.Empty;
+            return false;
+        }
+
+        var cardName = ResolveInstanceLabel(text[..markerIndex], context);
+        var target = SimplifyEffectDescription(text[(markerIndex + marker.Length)..], context);
+        result = string.IsNullOrWhiteSpace(target)
+            ? $"{cardName} answers the play."
+            : $"{cardName} answers {target}.";
         return true;
     }
 
@@ -354,7 +395,7 @@ public sealed class MatchReplayQueries
         var defenderMarkerIndex = remaining.IndexOf(defenderMarker, StringComparison.Ordinal);
         var defender = ResolvePlayerLabel(remaining[..defenderMarkerIndex], context);
         var damage = remaining[(defenderMarkerIndex + defenderMarker.Length)..];
-        result = $"{attacker} attacks {defender} for {damage}";
+        result = EnsureSentence($"{attacker} attacks {defender} for {damage}");
         return true;
     }
 
@@ -380,7 +421,23 @@ public sealed class MatchReplayQueries
 
         var defender = ResolvePlayerLabel(remaining[..defenderMarkerIndex], context);
         var damage = remaining[(defenderMarkerIndex + defenderMarker.Length)..];
-        result = $"{attacker} attacks {defender} for {damage}";
+        result = EnsureSentence($"{attacker} attacks {defender} for {damage}");
+        return true;
+    }
+
+    private static bool TryPhraseAssignedToDefender(string text, ReplayPhraseContext context, out string result)
+    {
+        const string marker = " attack damage is assigned to Defender ";
+        var markerIndex = text.IndexOf(marker, StringComparison.Ordinal);
+        if (markerIndex < 0)
+        {
+            result = string.Empty;
+            return false;
+        }
+
+        var amount = text[..markerIndex].Trim();
+        var defender = ResolveInstanceLabel(text[(markerIndex + marker.Length)..].TrimEnd('.'), context);
+        result = $"{defender} absorbs {amount} damage.";
         return true;
     }
 
@@ -409,6 +466,31 @@ public sealed class MatchReplayQueries
         }
 
         result = $"{ResolveInstanceLabel(text[..markerIndex], context)} takes {text[(markerIndex + marker.Length)..]}";
+        return true;
+    }
+
+    private static bool TryPhraseDeathCheck(string text, out string result)
+    {
+        if (!text.StartsWith("Death check finds ", StringComparison.Ordinal) || !text.EndsWith(" dead.", StringComparison.Ordinal))
+        {
+            result = string.Empty;
+            return false;
+        }
+
+        result = string.Empty;
+        return true;
+    }
+
+    private static bool TryPhraseLeavesBattlefield(string text, ReplayPhraseContext context, out string result)
+    {
+        const string marker = " leaves the Battlefield and moves to Discard.";
+        if (!text.EndsWith(marker, StringComparison.Ordinal))
+        {
+            result = string.Empty;
+            return false;
+        }
+
+        result = $"{ResolveInstanceLabel(text[..^marker.Length], context)} is destroyed.";
         return true;
     }
 
@@ -449,16 +531,58 @@ public sealed class MatchReplayQueries
             return false;
         }
 
-        var detail = ReplaceIdentifiers(text[marker.Length..], context);
-        detail = RemoveCardCodes(detail);
-        var nestedMarkerIndex = detail.LastIndexOf(": ", StringComparison.Ordinal);
-        if (nestedMarkerIndex >= 0)
+        result = EnsureSentence(SimplifyEffectDescription(text[marker.Length..], context));
+        return true;
+    }
+
+    private static bool TryPhraseCounterResolution(string text, ReplayPhraseContext context, out string result)
+    {
+        const string marker = " counters ";
+        var markerIndex = text.IndexOf(marker, StringComparison.Ordinal);
+        if (markerIndex < 0)
         {
-            detail = detail[(nestedMarkerIndex + 2)..];
+            result = string.Empty;
+            return false;
         }
 
-        detail = detail.Replace("spell ", string.Empty, StringComparison.OrdinalIgnoreCase).Trim();
-        result = $"Resolve: {detail}";
+        var counter = ResolveCardLabel(text[..markerIndex].Trim(), context);
+        var target = SimplifyEffectDescription(text[(markerIndex + marker.Length)..], context);
+        result = string.IsNullOrWhiteSpace(target)
+            ? $"{counter} counters the play."
+            : $"{counter} counters {target}.";
+        return true;
+    }
+
+    private static bool TryPhrasePreventDamage(string text, ReplayPhraseContext context, out string result)
+    {
+        const string marker = " prevents damage from ";
+        var markerIndex = text.IndexOf(marker, StringComparison.Ordinal);
+        if (markerIndex < 0)
+        {
+            result = string.Empty;
+            return false;
+        }
+
+        var source = ResolveCardLabel(text[..markerIndex].Trim(), context);
+        var remainder = text[(markerIndex + marker.Length)..].TrimEnd('.');
+        var attacker = ResolveInstanceLabel(remainder.Replace(" this attack", string.Empty, StringComparison.Ordinal), context);
+        result = $"{source} blocks {attacker} this attack.";
+        return true;
+    }
+
+    private static bool TryPhraseCountered(string text, ReplayPhraseContext context, out string result)
+    {
+        const string marker = " is countered.";
+        if (!text.EndsWith(marker, StringComparison.Ordinal))
+        {
+            result = string.Empty;
+            return false;
+        }
+
+        var detail = SimplifyEffectDescription(text[..^marker.Length], context);
+        result = string.IsNullOrWhiteSpace(detail)
+            ? "The play is countered."
+            : $"{detail} is countered.";
         return true;
     }
 
@@ -485,8 +609,11 @@ public sealed class MatchReplayQueries
         }
 
         var cardId = match.Value;
-        return context.ResolveCardName(cardId) ?? cardId;
+        return ResolveCardLabel(cardId, context);
     }
+
+    private static string ResolveCardLabel(string cardId, ReplayPhraseContext context)
+        => context.ResolveCardName(cardId) ?? cardId;
 
     private static string ResolvePlayerLabel(string raw, ReplayPhraseContext context)
     {
@@ -505,7 +632,30 @@ public sealed class MatchReplayQueries
     }
 
     private static string RemoveCardCodes(string text)
-        => Regex.Replace(text, @"\b(?:CH|CT|SP|UN)\d{3}\s+", string.Empty).Trim();
+        => CardCodeWithNamePattern.Replace(text, string.Empty).Trim();
+
+    private static string SimplifyEffectDescription(string text, ReplayPhraseContext context)
+    {
+        var value = ReplaceIdentifiers(text.TrimEnd('.'), context);
+        value = RemoveCardCodes(value);
+
+        var nestedMarkerIndex = value.LastIndexOf(": ", StringComparison.Ordinal);
+        if (nestedMarkerIndex >= 0)
+        {
+            value = value[(nestedMarkerIndex + 2)..];
+        }
+
+        return value
+            .Replace("spell ", string.Empty, StringComparison.OrdinalIgnoreCase)
+            .Replace(" counter effect", string.Empty, StringComparison.OrdinalIgnoreCase)
+            .Trim();
+    }
+
+    private static string EnsureSentence(string text)
+    {
+        var value = text.Trim();
+        return value.EndsWith(".", StringComparison.Ordinal) ? value : value + ".";
+    }
 
     private static int ParseHealth(string entry)
     {

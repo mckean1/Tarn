@@ -23,8 +23,20 @@ public sealed class LeagueTests
 
         var output = LeagueRenderer.Render(state, new Rect(0, 0, 100, 20));
 
-        Assert.Contains("(You)", output);
+        Assert.Contains("You", output);
+        Assert.DoesNotContain("(You)", output);
         Assert.Contains("Form", output);
+    }
+
+    [Fact]
+    public void LeagueQueryUsesFantasyAiNamesInsteadOfPlayerNumbers()
+    {
+        var world = new WorldFactory().CreateNewWorld(1, "You");
+        var human = world.Players.Values.Single(player => player.IsHuman);
+
+        var model = new LeagueQueries().Build(world, human.Id, 0, 0);
+
+        Assert.DoesNotContain(model.Rows.Select(row => row.PlayerName), name => name.StartsWith("Player ", StringComparison.Ordinal));
     }
 
     [Fact]

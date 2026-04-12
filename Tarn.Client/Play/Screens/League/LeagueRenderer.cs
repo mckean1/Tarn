@@ -19,7 +19,7 @@ public static class LeagueRenderer
         {
             index == state.League.SelectedIndex ? ">" : row.IsHuman ? "*" : " ",
             row.Rank,
-            row.PlayerName + (row.IsHuman ? " (You)" : string.Empty),
+            row.PlayerName,
             row.Record,
             row.MatchPoints,
             row.GameDiff,

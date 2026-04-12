@@ -60,7 +60,7 @@ public sealed class DashboardQueries
     {
         var opponentId = match.HomePlayerId == humanPlayerId ? match.AwayPlayerId : match.HomePlayerId;
         return new DashboardNextMatchViewModel(
-            world.Players[opponentId].Name,
+            PlayerNameFormatter.Format(world, humanPlayerId, opponentId),
             match.League.ToString(),
             match.Week == world.Season.CurrentWeek ? "This Week" : $"Week {match.Week}");
     }
@@ -107,7 +107,7 @@ public sealed class DashboardQueries
     {
         var won = match.Result!.WinnerPlayerId == humanPlayerId;
         var opponentId = match.HomePlayerId == humanPlayerId ? match.AwayPlayerId : match.HomePlayerId;
-        return $"Match • W{match.Week} {(won ? "beat" : "lost to")} {world.Players[opponentId].Name} {match.Result.WinnerGameWins}-{match.Result.LoserGameWins}";
+        return $"Match • W{match.Week} {(won ? "beat" : "lost to")} {PlayerNameFormatter.Format(world, humanPlayerId, opponentId)} {match.Result.WinnerGameWins}-{match.Result.LoserGameWins}";
     }
 
     private static (int Week, int Priority, string Text)? BuildMarketActivity(World world, string humanPlayerId, MarketListing listing)

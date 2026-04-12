@@ -706,6 +706,33 @@ public sealed class MvpSystemsTests
         Assert.DoesNotContain(awarded, owned => string.Equals(owned.CardId, issued, StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void GeneratedCardNamesAvoidPlaceholderPatterns()
+    {
+        var world = new WorldFactory().CreateNewWorld();
+        var pattern = new System.Text.RegularExpressions.Regex(@"\b(?:Champion|Unit|Spell|Counter)\s+\d+\b", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+        Assert.All(
+            world.CardVersions.Values.SelectMany(versions => versions).Select(version => version.Definition.Name),
+            name => Assert.DoesNotMatch(pattern, name));
+    }
+
+    [Fact]
+    public void LeagueAiNamesAreUniqueAndNeverUsePlaceholderPlayerNames()
+    {
+        var world = new WorldFactory().CreateNewWorld(1, "You");
+        var placeholderPattern = new System.Text.RegularExpressions.Regex(@"^(?:Player|Manager)\s+\d+$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+        foreach (var league in world.Config.Leagues.LeagueOrder)
+        {
+            var players = world.Players.Values.Where(player => player.League == league).ToList();
+            var aiPlayers = players.Where(player => !player.IsHuman).ToList();
+
+            Assert.Equal(aiPlayers.Count, aiPlayers.Select(player => player.Name).Distinct(StringComparer.Ordinal).Count());
+            Assert.DoesNotContain(aiPlayers, player => placeholderPattern.IsMatch(player.Name));
+        }
+    }
+
     private static void SeedStandingsForPlayoffs(World world, LeagueTier league)
     {
         foreach (var divisionId in world.Leagues[league].DivisionIds)

@@ -8,16 +8,38 @@ namespace Tarn.Client.Tests;
 public sealed class MatchReplayTests
 {
     [Theory]
-    [InlineData("   1 | P1 Champion: Veyn", "Home champion: Veyn.")]
-    [InlineData("   2 | P2 plays UN014 Hearthblade Initiate.", "Away plays Hearthblade Initiate.")]
-    [InlineData("   3 | P1 Deck: UN001, UN002, UN003", "Home deck ready.")]
-    [InlineData("   4 | P1-UN014-1 enters the Battlefield as 4/5.", "UN014 enters as 4/5.")]
+    [InlineData("   1 | P1 Champion: Veyn", "Both champions are ready.")]
+    [InlineData("   2 | P2 plays SET002-UN06-C Null Unit 6.", "Away plays Null Unit 6.")]
+    [InlineData("   3 | P1 Deck: UN001, UN002, UN003", "")]
+    [InlineData("   4 | P1-SET002-UN06-C-1 enters the Battlefield as 4/5.", "Null Unit 6 enters as 4/5.")]
     [InlineData("   5 | Win check: P1=20, P2=18.", "Win check: both champions survive.")]
     [InlineData("  20 | Enter Overtime", "Both champions fall. Overtime begins.")]
     [InlineData("  21 | P1 is out of cards and takes Fatigue 1.", "Home is out of cards and takes Fatigue 1.")]
     public void PhrasesReplayEvents(string raw, string expected)
     {
         Assert.Equal(expected, MatchReplayQueries.PhraseEvent(raw));
+    }
+
+    [Fact]
+    public void ShapeEventLogKeepsStepAlignmentWhileSuppressingSetupNoise()
+    {
+        var shaped = MatchReplayQueries.ShapeEventLog(
+        [
+            "   1 | Seed: 1002",
+            "   2 | P1 Champion: Veyn",
+            "   3 | P2 Champion: Serah",
+            "   4 | P1 Deck: UN001, UN002, UN003",
+            "   5 | P2 Deck: UN001, UN002, UN003",
+            "   6 | Round 1 initiative: P1"
+        ]);
+
+        Assert.Equal(6, shaped.Count);
+        Assert.Equal("Replay seed 1002.", shaped[0]);
+        Assert.Equal("Both champions are ready.", shaped[1]);
+        Assert.Equal("Both champions are ready.", shaped[2]);
+        Assert.Equal(string.Empty, shaped[3]);
+        Assert.Equal(string.Empty, shaped[4]);
+        Assert.Equal("Home has initiative.", shaped[5]);
     }
 
     [Fact]

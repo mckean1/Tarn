@@ -4,6 +4,16 @@ namespace Tarn.ClientApp.Play.Rendering;
 
 public static class TextLayout
 {
+   public static string PadVisibleLeft(string? text, int width)
+    {
+        var safeWidth = Math.Max(0, width);
+        var value = text ?? string.Empty;
+        var visibleLength = AnsiUtility.GetVisibleLength(value);
+        return visibleLength >= safeWidth
+            ? value
+            : new string(' ', safeWidth - visibleLength) + value;
+    }
+
     public static string PadVisibleRight(string? text, int width)
     {
         var safeWidth = Math.Max(0, width);
@@ -14,7 +24,7 @@ public static class TextLayout
             : value + new string(' ', safeWidth - visibleLength);
     }
 
-    public static string TruncateVisible(string? text, int width)
+   public static string ClipVisible(string? text, int width)
     {
         if (width <= 0)
         {
@@ -25,7 +35,7 @@ public static class TextLayout
         var visibleLength = AnsiUtility.GetVisibleLength(value);
         if (visibleLength <= width)
         {
-            return PadVisibleRight(value, width);
+            return value;
         }
 
         if (width == 1)
@@ -37,6 +47,11 @@ public static class TextLayout
         return TerminalStyle.ContainsAnsi(value)
             ? truncated + "." + TerminalStyle.Reset
             : truncated + ".";
+    }
+
+    public static string TruncateVisible(string? text, int width)
+    {
+     return PadVisibleRight(ClipVisible(text, width), width);
     }
 
     private static string TakeVisible(string value, int visibleLength)

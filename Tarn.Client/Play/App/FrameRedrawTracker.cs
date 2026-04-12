@@ -1,3 +1,5 @@
+using Tarn.ClientApp.Play.Rendering;
+
 namespace Tarn.ClientApp.Play.App;
 
 public sealed class FrameRedrawTracker
@@ -9,13 +11,13 @@ public sealed class FrameRedrawTracker
 
     public bool UpdateWindow(AppState state, int consoleWidth, int consoleHeight)
     {
-        var nextWidth = Math.Max(60, consoleWidth);
-        var nextHeight = Math.Max(24, consoleHeight);
+        var nextWidth = Math.Max(0, consoleWidth);
+        var nextHeight = Math.Max(0, consoleHeight);
         var changed = state.WindowWidth != nextWidth || state.WindowHeight != nextHeight;
 
         state.WindowWidth = nextWidth;
         state.WindowHeight = nextHeight;
-        state.IsNarrowLayout = state.WindowWidth < 100;
+        state.IsNarrowLayout = FrameNormalizer.GetDrawableWidth(state.WindowWidth) < 100;
 
         if (changed)
         {

@@ -1,5 +1,6 @@
 using Tarn.ClientApp.Play.App;
 using Tarn.ClientApp.Play.Queries;
+using Tarn.ClientApp.Play.Rendering;
 using Tarn.ClientApp.Play.Screens.Collector;
 using Tarn.ClientApp.Play.Screens.Market;
 using Tarn.Domain;
@@ -10,10 +11,121 @@ public sealed class CollectorMarketTests
 {
     [Theory]
     [InlineData(100, 80, "Affordable")]
-    [InlineData(50, 80, "Too Expensive")]
+    [InlineData(50, 80, "Not enough cash")]
     public void FormatsAffordabilityLabels(int cash, int price, string expected)
     {
         Assert.Equal(expected, CollectorQueries.FormatAffordability(cash, price));
+    }
+
+    [Fact]
+    public void CollectorRendererFormatsSinglesWithDetailPane()
+    {
+        var state = BuildState();
+        state.Collector.Tab = CollectorTab.Singles;
+        state.Collector.SelectedIndex = 0;
+        var row = new CollectorRowViewModel(
+            "S-1",
+            "Ashen Scout",
+            "Unit",
+            "Common",
+            38,
+            "Affordable",
+            "Collector single",
+            "Unit. No keyword.",
+            "ATK 1 · HP 4 · SPD 0",
+            "None",
+            "Buy for 38",
+            "Buy for 38",
+            "Owned: 3");
+        state.Collector.ViewModel = new CollectorViewModel(CollectorTab.Singles, 0, [row], row);
+
+        var output = CollectorRenderer.Render(state, new Rect(0, 0, 100, 18));
+        var plainOutput = AnsiUtility.StripAnsi(output);
+
+        Assert.Contains("[Singles]  Packs  Sell", plainOutput);
+        Assert.Contains("Name", plainOutput);
+        Assert.Contains("Type", plainOutput);
+        Assert.Contains("Rarity", plainOutput);
+        Assert.Contains("Price", plainOutput);
+        Assert.Contains("Status", plainOutput);
+        Assert.Contains("> Ashen Scout", plainOutput);
+        Assert.Contains("┌ Selected Item", plainOutput);
+        Assert.Contains("Keywords: None", plainOutput);
+        Assert.Contains("Buy for 38", plainOutput);
+        Assert.DoesNotContain("Left/Right tabs, Up/Down selection", plainOutput);
+
+        if (TerminalStyle.SupportsAnsi)
+        {
+            Assert.Contains(TerminalStyle.BrightWhite, output);
+        }
+    }
+
+    [Fact]
+    public void CollectorRendererMakesPacksFeelDistinct()
+    {
+        var state = BuildState();
+        state.Collector.Tab = CollectorTab.Packs;
+        state.Collector.SelectedIndex = 0;
+        var row = new CollectorRowViewModel(
+            "P-1",
+            "Starter Pack",
+            "Pack",
+            string.Empty,
+            100,
+            "Affordable",
+            "Contains 10 cards · Common-heavy",
+            "Contains 5 Commons, 3 Rares, 2 Epics, with a chance to upgrade an Epic slot into a Legendary.",
+            null,
+            "N/A",
+            "Open for 100",
+            "Open for 100",
+            null);
+        state.Collector.ViewModel = new CollectorViewModel(CollectorTab.Packs, 0, [row], row);
+
+        var plainOutput = AnsiUtility.StripAnsi(CollectorRenderer.Render(state, new Rect(0, 0, 100, 18)));
+
+        Assert.Contains("Pack", plainOutput);
+        Assert.Contains("Contents", plainOutput);
+        Assert.Contains("Starter Pack", plainOutput);
+        Assert.Contains("Common-heavy", plainOutput);
+        Assert.Contains("┌ Selected Pack", plainOutput);
+        Assert.Contains("Open for 100", plainOutput);
+    }
+
+    [Fact]
+    public void CollectorRendererShowsSellColumnsAndEmptyStates()
+    {
+        var state = BuildState();
+        state.Collector.Tab = CollectorTab.Sell;
+        state.Collector.SelectedIndex = 0;
+        var row = new CollectorRowViewModel(
+            "SELL-1",
+            "Briar Duelist",
+            "Unit",
+            "Rare",
+            12,
+            "Sellable",
+            "Owned: 3",
+            "Unit. Defender",
+            "ATK 2 · HP 5 · SPD 1",
+            "Defender",
+            "Sell for 12",
+            "Sell for 12",
+            "Owned: 3",
+            3);
+        state.Collector.ViewModel = new CollectorViewModel(CollectorTab.Sell, 0, [row], row);
+
+        var plainOutput = AnsiUtility.StripAnsi(CollectorRenderer.Render(state, new Rect(0, 0, 100, 18)));
+
+        Assert.Contains("Owned", plainOutput);
+        Assert.Contains("Sell", plainOutput);
+        Assert.Contains("Sellable", plainOutput);
+        Assert.Contains("Briar Duelist x3", plainOutput);
+        Assert.Contains("Sell for 12", plainOutput);
+
+        state.Collector.ViewModel = new CollectorViewModel(CollectorTab.Sell, 0, [], null);
+        plainOutput = AnsiUtility.StripAnsi(CollectorRenderer.Render(state, new Rect(0, 0, 100, 14)));
+        Assert.Contains("[Nothing to Sell]", plainOutput);
     }
 
     [Fact]
@@ -32,13 +144,14 @@ public sealed class CollectorMarketTests
     {
         var text = CollectorQueries.FormatPackReveal(
         [
-            new PackRevealCard("Ash Drifter", "Common", true),
-            new PackRevealCard("Snap Denial", "Rare", false),
+            new PackRevealCard("UN001", "Ashen Scout", CardType.Unit, CardRarity.Common, true),
+            new PackRevealCard("UN001", "Ashen Scout", CardType.Unit, CardRarity.Common, false),
+            new PackRevealCard("CT001", "Bastion Ward", CardType.Counter, CardRarity.Rare, false),
         ]);
 
-        Assert.Contains("1 new, 1 dupes", text);
-        Assert.Contains("[Common] Ash Drifter NEW", text);
-        Assert.Contains("[Rare] Snap Denial DUPE", text);
+        Assert.Contains("1 new, 2 dupes", text);
+        Assert.Contains("[Common] Ashen Scout x2 1 new", text);
+        Assert.Contains("[Rare] Bastion Ward x1 DUPE", text);
     }
 
     [Fact]
