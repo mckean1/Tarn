@@ -79,6 +79,7 @@ public sealed class MatchSetup
     public string PlayerOneId { get; init; } = "P1";
     public string PlayerTwoId { get; init; } = "P2";
     public bool ShuffleDecks { get; init; } = true;
+    public InitiativeContext? Initiative { get; init; }
 }
 
 public sealed class SimulatedMatchResult

@@ -58,7 +58,8 @@ public sealed partial class GameEngine
                 HealChampion(state, owner.Id, 3, "Mending Light");
                 break;
             default:
-                throw new InvalidOperationException($"Unknown spell {spell.Id}.");
+                ResolveGeneratedSpell(state, owner, spell);
+                break;
         }
 
         PerformDeathCheck(state);
@@ -76,6 +77,38 @@ public sealed partial class GameEngine
 
         apply(target);
         state.Log($"{label} modifies {target.InstanceId}.");
+    }
+
+    private void ResolveGeneratedSpell(MatchState state, PlayerState owner, SpellCardDefinition spell)
+    {
+        var effectValue = Math.Max(1, spell.EffectValue == 0 ? 1 : spell.EffectValue);
+        switch (effectValue % 3)
+        {
+            case 0:
+            {
+                var target = SelectTargetedEnemyUnit(state, owner.Id);
+                if (target is null)
+                {
+                    state.Log($"{spell.Id} has no target and fizzles.");
+                    return;
+                }
+
+                DealDamageToUnit(state, target, effectValue, new DamageCause
+                {
+                    SourcePlayerId = owner.Id,
+                    SourceCardId = spell.Id,
+                    IsSpellOrEffect = true,
+                    IsTargetedUnitEffect = true,
+                });
+                break;
+            }
+            case 1:
+                ModifyOldestFriendlyUnit(state, owner.Id, spell.Name, unit => unit.Attack += effectValue);
+                break;
+            default:
+                HealChampion(state, owner.Id, effectValue, spell.Name);
+                break;
+        }
     }
 
     private void ResolveAttackStep(MatchState state)

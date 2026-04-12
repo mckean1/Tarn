@@ -179,6 +179,18 @@ public sealed partial class GameEngine
             return first.Speed > second.Speed ? 0 : 1;
         }
 
+        if (state.Setup.Initiative is { IsPlayoff: true } playoff)
+        {
+            var homeSeed = playoff.HomeSeed ?? int.MaxValue;
+            var awaySeed = playoff.AwaySeed ?? int.MaxValue;
+            return homeSeed <= awaySeed ? 0 : 1;
+        }
+
+        if (state.Setup.Initiative is { } regular)
+        {
+            return regular.FixturePriority % 2 == 1 ? 0 : 1;
+        }
+
         var order = TarnCardRegistry.ChampionSpeedTiebreakOrder;
         return order.ToList().IndexOf(first.Id) <= order.ToList().IndexOf(second.Id) ? 0 : 1;
     }

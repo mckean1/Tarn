@@ -108,7 +108,16 @@ public sealed partial class GameEngine
                 state.Log($"Brace the Line prevents damage from {target.Attacker.InstanceId} this attack.");
                 break;
             default:
-                throw new InvalidOperationException($"Unknown counter {counter.Card.Id}.");
+                if (target.Kind == PendingEffectKind.Attack && target.Attacker is not null && counter.Card.Trigger == CounterTriggerType.EnemyUnitAttacks)
+                {
+                    target.PreventAttackDamage = true;
+                    state.Log($"{counter.Card.Id} prevents damage from {target.Attacker.InstanceId}.");
+                    return;
+                }
+
+                target.IsCountered = true;
+                state.Log($"{counter.Card.Id} counters {target.Description}.");
+                break;
         }
     }
 

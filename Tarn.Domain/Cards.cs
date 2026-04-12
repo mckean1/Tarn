@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Tarn.Domain;
 
 public enum CardType
@@ -29,6 +31,11 @@ public enum CounterTriggerType
     EnemyUnitAttacks,
 }
 
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "$cardKind")]
+[JsonDerivedType(typeof(ChampionCardDefinition), "champion")]
+[JsonDerivedType(typeof(UnitCardDefinition), "unit")]
+[JsonDerivedType(typeof(SpellCardDefinition), "spell")]
+[JsonDerivedType(typeof(CounterCardDefinition), "counter")]
 public abstract record CardDefinition(
     string Id,
     string Name,
@@ -43,6 +50,16 @@ public abstract record CardDefinition(
     IReadOnlyList<string>? Traits = null)
 {
     public IReadOnlyList<string> Traits { get; init; } = Traits ?? [];
+    public CardRarity Rarity { get; init; } = CardRarity.Common;
+    public string SetId { get; init; } = string.Empty;
+    public int Version { get; init; } = 1;
+    public bool IsUnique { get; init; }
+    public string RulesText { get; init; } = string.Empty;
+    public IReadOnlyList<string> Keywords { get; init; } = [];
+    public int EffectValue { get; init; }
+    public TriggerType? TriggerTiming { get; init; }
+    public CounterTriggerType? CounterWindow { get; init; }
+    public bool OncePerRound { get; init; }
 }
 
 public sealed record ChampionCardDefinition(
@@ -114,6 +131,88 @@ public sealed class DeckDefinition
         {
             throw new InvalidOperationException("Deck exceeds the 100 Power cap.");
         }
+    }
+}
+
+public sealed class DeckValidationResult
+{
+    public bool IsValid => Errors.Count == 0;
+    public List<string> Errors { get; } = [];
+}
+
+public static class DeckValidator
+{
+    public static DeckValidationResult ValidateSubmittedDeck(World world, Player player, SubmittedDeck submittedDeck)
+    {
+        var result = new DeckValidationResult();
+        var config = world.Config.Season;
+        var availableCards = player.Collection
+            .Where(card => !card.IsListed && !card.PendingSettlement)
+            .ToDictionary(card => card.InstanceId, StringComparer.Ordinal);
+
+        if (!availableCards.TryGetValue(submittedDeck.ChampionInstanceId, out var championCard))
+        {
+            result.Errors.Add("Champion card is not available in the player collection.");
+            return result;
+        }
+
+        if (submittedDeck.NonChampionInstanceIds.Count != config.NonChampionCount)
+        {
+            result.Errors.Add($"Deck must contain exactly {config.NonChampionCount} non-Champion cards.");
+        }
+
+        if (submittedDeck.NonChampionInstanceIds.Distinct(StringComparer.Ordinal).Count() != submittedDeck.NonChampionInstanceIds.Count)
+        {
+            result.Errors.Add("Deck cannot contain duplicate card instances.");
+        }
+
+        if (submittedDeck.NonChampionInstanceIds.Any(instanceId => !availableCards.ContainsKey(instanceId)))
+        {
+            result.Errors.Add("Deck contains unavailable non-Champion cards.");
+        }
+
+        var championDefinition = world.GetLatestDefinition(championCard.CardId);
+        if (championDefinition.Type != CardType.Champion)
+        {
+            result.Errors.Add("Submitted champion is not a Champion card.");
+        }
+
+        var nonChampionDefinitions = submittedDeck.NonChampionInstanceIds
+            .Where(availableCards.ContainsKey)
+            .Select(instanceId => world.GetLatestDefinition(availableCards[instanceId].CardId))
+            .ToList();
+
+        if (nonChampionDefinitions.Any(card => card.Type == CardType.Champion))
+        {
+            result.Errors.Add("Champion cards cannot appear among the 30 non-Champion cards.");
+        }
+
+        var illegalCopies = nonChampionDefinitions
+            .GroupBy(card => card.Id, StringComparer.Ordinal)
+            .FirstOrDefault(group => group.Count() > config.MaxCopiesPerCard);
+        if (illegalCopies is not null)
+        {
+            result.Errors.Add($"Card '{illegalCopies.Key}' exceeds the {config.MaxCopiesPerCard}-copy limit.");
+        }
+
+        var deckPower = nonChampionDefinitions.Sum(card => card.Power) + championDefinition.Power;
+        if (deckPower > config.MaxDeckPower)
+        {
+            result.Errors.Add($"Deck exceeds the Power limit of {config.MaxDeckPower}.");
+        }
+
+        var standardSets = world.StandardSetIds.ToHashSet(StringComparer.Ordinal);
+        if (!standardSets.Contains(championDefinition.SetId) || nonChampionDefinitions.Any(card => !standardSets.Contains(card.SetId)))
+        {
+            result.Errors.Add("Deck includes cards that are not Standard-legal.");
+        }
+
+        if (submittedDeck.NonChampionInstanceIds.Count + 1 != config.DeckSize)
+        {
+            result.Errors.Add($"Deck must contain exactly {config.DeckSize} total cards.");
+        }
+
+        return result;
     }
 }
 
