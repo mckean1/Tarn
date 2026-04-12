@@ -248,6 +248,39 @@ public sealed class MvpSystemsTests
     }
 
     [Fact]
+    public void BuyingRevealedCollectorLegendary_SetsStateToOwned_AndDoesNotReturnToHiddenInventory()
+    {
+        var world = new WorldFactory().CreateNewWorld();
+        var player = world.Players.Values.Single(item => item.IsHuman);
+        var setId = world.StandardSetIds.Last();
+        var legendaryId = world.CardSets[setId].UnissuedLegendaryIds.First();
+        world.CollectorInventory.LegendaryStates[legendaryId] = LegendaryState.RevealedForCollector;
+        world.CardSets[setId].UnissuedLegendaryIds.Remove(legendaryId);
+        world.CardSets[setId].HiddenCollectorLegendaryIds.Remove(legendaryId);
+        var listing = new CollectorSingleOffer
+        {
+            ListingId = "LEG-BUY-1",
+            CardId = legendaryId,
+            Version = world.GetLatestVersion(legendaryId).Version,
+            Price = 500,
+            IsLegendaryReveal = true,
+        };
+        world.CollectorInventory.Singles.Add(listing);
+
+        var bought = CollectorService.BuySingle(world, player.Id, listing.ListingId);
+
+        Assert.True(bought);
+        Assert.Contains(player.Collection, card => string.Equals(card.CardId, legendaryId, StringComparison.Ordinal));
+        Assert.DoesNotContain(world.CollectorInventory.Singles, offer => string.Equals(offer.ListingId, listing.ListingId, StringComparison.Ordinal));
+        Assert.Equal(LegendaryState.Owned, world.CollectorInventory.LegendaryStates[legendaryId]);
+
+        CollectorService.Refresh(world, 7);
+
+        Assert.Equal(LegendaryState.Owned, world.CollectorInventory.LegendaryStates[legendaryId]);
+        Assert.DoesNotContain(legendaryId, world.CardSets[setId].HiddenCollectorLegendaryIds);
+    }
+
+    [Fact]
     public void HiddenLegendaryChampion_CanRelistInChampionSlot()
     {
         var (world, targetId) = CreateHiddenLegendaryRelistWorld(CardType.Champion);

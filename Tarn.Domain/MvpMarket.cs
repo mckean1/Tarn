@@ -121,6 +121,11 @@ public static class CollectorService
         }
 
         player.Cash -= listing.Price;
+        if (listing.IsLegendaryReveal)
+        {
+            world.CollectorInventory.LegendaryStates[listing.CardId] = LegendaryState.Owned;
+        }
+
         WorldFactory.GrantCard(world, player, listing.CardId);
         world.CollectorInventory.Singles.Remove(listing);
         return true;
