@@ -12,6 +12,7 @@ public sealed class GameEngine
         string InstanceId,
         long PlayOrder,
         Keyword Keywords,
+        int CurrentHealth,
         int CurrentAttack,
         bool MarkedForDestruction);
 
@@ -30,6 +31,7 @@ public sealed class GameEngine
         public List<CombatCardState> PendingUnits { get; } = [];
         public List<CounterState> PendingCounters { get; } = [];
         public List<DeferredEvent> DeferredEvents { get; } = [];
+        public Dictionary<string, int> PendingDamageByInstanceId { get; } = new(StringComparer.Ordinal);
     }
 
     public GameState CreateGame(
@@ -267,6 +269,7 @@ public sealed class GameEngine
                     unit.InstanceId,
                     unit.PlayOrder,
                     unit.Keywords,
+                    unit.CurrentHealth,
                     unit.CurrentAttack,
                     unit.MarkedForDestruction))
                 .OrderBy(unit => unit.PlayOrder)
@@ -281,6 +284,8 @@ public sealed class GameEngine
 
     private static void CommitSimultaneousBatch(GameState state, ResolutionBatchContext context)
     {
+        ApplyPendingBatchDamage(state, context);
+
         foreach (var unit in context.PendingUnits.OrderBy(unit => unit.PlayOrder))
         {
             state.GetPlayer(unit.OwnerId).Board.Add(unit);
@@ -294,6 +299,39 @@ public sealed class GameEngine
             state.GetPlayer(counter.OwnerId).Counters.Add(counter);
             Log(state, $"Counter {counter.Definition.Id} is set for {counter.OwnerId}.");
         }
+    }
+
+    private static void ApplyPendingBatchDamage(GameState state, ResolutionBatchContext context)
+    {
+        foreach (var pendingDamage in context.PendingDamageByInstanceId)
+        {
+            var target = TryGetCombatantByInstanceId(state, context, pendingDamage.Key);
+            if (target is null)
+            {
+                continue;
+            }
+
+            target.CurrentHealth -= pendingDamage.Value;
+        }
+    }
+
+    private static CombatCardState? TryGetCombatantByInstanceId(GameState state, ResolutionBatchContext context, string instanceId)
+    {
+        foreach (var player in state.Players)
+        {
+            if (player.Champion.InstanceId == instanceId)
+            {
+                return player.Champion;
+            }
+
+            var boardUnit = player.Board.FirstOrDefault(unit => unit.InstanceId == instanceId);
+            if (boardUnit is not null)
+            {
+                return boardUnit;
+            }
+        }
+
+        return context.PendingUnits.FirstOrDefault(unit => unit.InstanceId == instanceId);
     }
 
     private static void FlushDeferredEvents(GameState state, IReadOnlyList<DeferredEvent> deferredEvents)
@@ -687,6 +725,12 @@ public sealed class GameEngine
 
     private static void ApplyDamageToChampion(GameState state, PlayerState player, int amount, CombatCardState? source, ResolutionBatchContext? context = null)
     {
+        if (context is not null)
+        {
+            ApplyDamageToChampionUsingSnapshot(state, player, amount, source, context);
+            return;
+        }
+
         var remaining = amount;
         foreach (var defender in player.Board
                      .Where(unit => unit.Keywords.HasFlag(Keyword.Defender) && !unit.MarkedForDestruction)
@@ -722,6 +766,61 @@ public sealed class GameEngine
             SourceInstanceId = source?.InstanceId,
             Message = $"Champion for {player.Id} takes {remaining} damage.",
         });
+    }
+
+    private static void ApplyDamageToChampionUsingSnapshot(
+        GameState state,
+        PlayerState player,
+        int amount,
+        CombatCardState? source,
+        ResolutionBatchContext context)
+    {
+        var remaining = amount;
+        foreach (var defender in context.SnapshotBoards[player.Id]
+                     .Where(unit => unit.Keywords.HasFlag(Keyword.Defender) && !unit.MarkedForDestruction)
+                     .OrderBy(unit => unit.PlayOrder))
+        {
+            if (remaining <= 0)
+            {
+                break;
+            }
+
+            var intercepted = Math.Min(remaining, Math.Max(0, defender.CurrentHealth));
+            if (intercepted <= 0)
+            {
+                continue;
+            }
+
+            AddPendingDamage(context, defender.InstanceId, intercepted);
+            Log(state, $"{intercepted} damage is redirected to Defender {defender.InstanceId}.");
+            remaining -= intercepted;
+        }
+
+        if (remaining <= 0)
+        {
+            return;
+        }
+
+        AddPendingDamage(context, player.Champion.InstanceId, remaining);
+        context.DeferredEvents.Add(new DeferredEvent
+        {
+            EventType = TriggerEventType.ChampionDamaged,
+            SourcePlayerId = player.Id,
+            SourceCardId = source?.Definition.Id,
+            SourceInstanceId = source?.InstanceId,
+            Message = $"Champion for {player.Id} takes {remaining} damage.",
+        });
+    }
+
+    private static void AddPendingDamage(ResolutionBatchContext context, string instanceId, int amount)
+    {
+        if (amount <= 0)
+        {
+            return;
+        }
+
+        context.PendingDamageByInstanceId.TryGetValue(instanceId, out var currentAmount);
+        context.PendingDamageByInstanceId[instanceId] = currentAmount + amount;
     }
 
     private static void ApplyDamageToUnit(GameState state, CombatCardState target, int amount, CombatCardState? source, ResolutionBatchContext? context = null)

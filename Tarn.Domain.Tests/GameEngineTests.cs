@@ -261,6 +261,144 @@ public sealed class GameEngineTests
     }
 
     [Fact]
+    public void SimultaneousBatch_DefenderDamageDoesNotLeakIntoChampionInterception()
+    {
+        var engine = new GameEngine();
+        var hitDefender = TarnFixtures.GenericSpell(
+            "hit-defender",
+            onPlayed:
+            [
+                new EffectDefinition(EffectType.Damage, TargetSelector.AutoEnemyUnit, Amount: 2),
+            ]);
+        var hitChampion = TarnFixtures.GenericSpell(
+            "hit-champion",
+            onPlayed:
+            [
+                new EffectDefinition(EffectType.Damage, TargetSelector.EnemyChampion, Amount: 2),
+            ]);
+        var defenderDefinition = TarnFixtures.GenericUnit("defender", attack: 0, health: 2, keywords: Keyword.Defender);
+
+        var game = engine.CreateGame(
+            higherSeedPlayerId: "p1",
+            playerOneId: "p1",
+            playerOneDeck: TarnFixtures.BuildDeck(TarnFixtures.GenericChampion("champion-a"), hitDefender),
+            playerTwoId: "p2",
+            playerTwoDeck: TarnFixtures.BuildDeck(TarnFixtures.GenericChampion("champion-b"), hitChampion),
+            seed: 47,
+            gameNumber: 1);
+
+        game.PlayerOne.Library = new Queue<CardDefinition>([hitDefender]);
+        game.PlayerTwo.Library = new Queue<CardDefinition>([hitChampion]);
+        game.PlayerOne.Board.Add(new CombatCardState
+        {
+            InstanceId = "p1-defender",
+            OwnerId = "p1",
+            Definition = defenderDefinition,
+            EnteredRound = 0,
+            PlayOrder = 1,
+            CurrentHealth = 2,
+        });
+
+        engine.PlayRound(game);
+
+        Assert.Equal(20, game.PlayerOne.Champion.CurrentHealth);
+        Assert.Empty(game.PlayerOne.Board);
+        Assert.Contains(game.Logs, entry => entry.Message.Contains("2 damage is redirected to Defender p1-defender", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void SimultaneousBatch_MultipleChampionDamagePacketsUseSamePreBatchDefenderState()
+    {
+        var engine = new GameEngine();
+        var doubleStrike = TarnFixtures.GenericSpell(
+            "double-strike",
+            onPlayed:
+            [
+                // Same-batch packets each calculate Defender interception from the same pre-batch state.
+                new EffectDefinition(EffectType.Damage, TargetSelector.EnemyChampion, Amount: 2),
+                new EffectDefinition(EffectType.Damage, TargetSelector.EnemyChampion, Amount: 2),
+            ]);
+        var defenderDefinition = TarnFixtures.GenericUnit("defender", attack: 0, health: 2, keywords: Keyword.Defender);
+
+        var game = engine.CreateGame(
+            higherSeedPlayerId: "p1",
+            playerOneId: "p1",
+            playerOneDeck: TarnFixtures.BuildDeck(TarnFixtures.GenericChampion("champion-a"), doubleStrike),
+            playerTwoId: "p2",
+            playerTwoDeck: TarnFixtures.BuildDeck(TarnFixtures.GenericChampion("champion-b")),
+            seed: 53,
+            gameNumber: 1);
+
+        game.PlayerOne.Library = new Queue<CardDefinition>([doubleStrike]);
+        game.PlayerTwo.Library = new Queue<CardDefinition>([TarnFixtures.GenericSpell("blank")]);
+        game.PlayerTwo.Board.Add(new CombatCardState
+        {
+            InstanceId = "p2-defender",
+            OwnerId = "p2",
+            Definition = defenderDefinition,
+            EnteredRound = 0,
+            PlayOrder = 1,
+            CurrentHealth = 2,
+        });
+
+        engine.PlayRound(game);
+
+        Assert.Equal(20, game.PlayerTwo.Champion.CurrentHealth);
+        Assert.Empty(game.PlayerTwo.Board);
+        Assert.Equal(
+            2,
+            game.Logs.Count(entry => entry.Message.Contains("2 damage is redirected to Defender p2-defender", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void SimultaneousBatch_ChampionInterceptionDoesNotReadLiveDefenderHealth()
+    {
+        var engine = new GameEngine();
+        var damageSource = TarnFixtures.GenericSpell(
+            "damage-source",
+            keywords: Keyword.Quick,
+            onPlayed:
+            [
+                new EffectDefinition(EffectType.Damage, TargetSelector.AutoEnemyUnit, Amount: 1),
+            ]);
+        var championHit = TarnFixtures.GenericSpell(
+            "champion-hit",
+            keywords: Keyword.Quick,
+            onPlayed:
+            [
+                new EffectDefinition(EffectType.Damage, TargetSelector.EnemyChampion, Amount: 2),
+            ]);
+        var defenderDefinition = TarnFixtures.GenericUnit("defender", attack: 0, health: 1, keywords: Keyword.Defender);
+
+        var game = engine.CreateGame(
+            higherSeedPlayerId: "p1",
+            playerOneId: "p1",
+            playerOneDeck: TarnFixtures.BuildDeck(TarnFixtures.GenericChampion("champion-a"), damageSource),
+            playerTwoId: "p2",
+            playerTwoDeck: TarnFixtures.BuildDeck(TarnFixtures.GenericChampion("champion-b"), championHit),
+            seed: 59,
+            gameNumber: 1);
+
+        game.PlayerOne.Library = new Queue<CardDefinition>([damageSource]);
+        game.PlayerTwo.Library = new Queue<CardDefinition>([championHit]);
+        game.PlayerOne.Board.Add(new CombatCardState
+        {
+            InstanceId = "p1-defender",
+            OwnerId = "p1",
+            Definition = defenderDefinition,
+            EnteredRound = 0,
+            PlayOrder = 1,
+            CurrentHealth = 1,
+        });
+
+        engine.PlayRound(game);
+
+        Assert.Equal(19, game.PlayerOne.Champion.CurrentHealth);
+        Assert.Empty(game.PlayerOne.Board);
+        Assert.Contains(game.Logs, entry => entry.Message.Contains("1 damage is redirected to Defender p1-defender", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void QuickBatch_IsStillSimultaneousWithinTheQuickStep()
     {
         var engine = new GameEngine();
