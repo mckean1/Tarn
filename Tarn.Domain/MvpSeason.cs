@@ -460,9 +460,21 @@ public sealed class WorldSimulator
     {
         foreach (var league in world.Config.Leagues.LeagueOrder)
         {
+            if (HasCompleteFinalPlacements(world, league))
+            {
+                continue;
+            }
+
             var ranked = StandingsCalculator.Rank(world.Season.Standings.Values.Where(entry => entry.League == league).ToList());
             world.Season.FinalPlacements[league] = ranked.Select(entry => entry.DeckId).ToList();
         }
+    }
+
+    private static bool HasCompleteFinalPlacements(World world, LeagueTier league)
+    {
+        return world.Season.FinalPlacements.TryGetValue(league, out var placements)
+            && placements.Count == world.Config.Leagues.PlayersPerLeague
+            && placements.Distinct(StringComparer.Ordinal).Count() == placements.Count;
     }
 
     private void PayoutRewards(World world)

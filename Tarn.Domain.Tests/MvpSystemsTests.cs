@@ -107,6 +107,62 @@ public sealed class MvpSystemsTests
     }
 
     [Fact]
+    public void SeasonClose_PreservesPlayoffBasedFinalPlacements()
+    {
+        var world = new WorldFactory().CreateNewWorld();
+        var playoffOrder = world.Players.Values.Where(player => player.League == LeagueTier.Bronze).OrderByDescending(player => player.Id, StringComparer.Ordinal).Select(player => player.Id).ToList();
+        world.Season.FinalPlacements[LeagueTier.Bronze] = playoffOrder;
+        SeedStandingsForPlayoffs(world, LeagueTier.Bronze);
+        world.Season.CurrentWeek = world.Config.Season.SeasonCloseWeek;
+
+        new WorldSimulator().ResolveAdministrativeWeek(world, 1);
+
+        Assert.Equal(playoffOrder, world.Season.FinalPlacements[LeagueTier.Bronze]);
+    }
+
+    [Fact]
+    public void Payouts_UsePlayoffBasedFinalPlacements()
+    {
+        var world = new WorldFactory().CreateNewWorld();
+        var bronzePlayers = world.Players.Values.Where(player => player.League == LeagueTier.Bronze).OrderBy(player => player.Id, StringComparer.Ordinal).ToList();
+        world.Season.FinalPlacements[LeagueTier.Bronze] = bronzePlayers.Select(player => player.Id).Reverse().ToList();
+        var champion = world.Players[world.Season.FinalPlacements[LeagueTier.Bronze][0]];
+        var runnerUp = world.Players[world.Season.FinalPlacements[LeagueTier.Bronze][1]];
+        var beforeChampion = champion.Cash;
+        var beforeRunnerUp = runnerUp.Cash;
+
+        typeof(WorldSimulator).GetMethod("PayoutRewards", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .Invoke(new WorldSimulator(), [world]);
+
+        Assert.Equal(beforeChampion + 2200, champion.Cash);
+        Assert.Equal(beforeRunnerUp + 1800, runnerUp.Cash);
+    }
+
+    [Fact]
+    public void PromotionRelegation_UsesPlayoffBasedFinalPlacements()
+    {
+        var world = new WorldFactory().CreateNewWorld();
+        var bronzeOrder = world.Players.Values.Where(player => player.League == LeagueTier.Bronze).OrderByDescending(player => player.Id, StringComparer.Ordinal).Select(player => player.Id).ToList();
+        world.Season.FinalPlacements[LeagueTier.Bronze] = bronzeOrder;
+
+        var moves = new WorldSimulator().GetPromotionRelegationMoves(world);
+
+        Assert.Equal(bronzeOrder.Take(4).ToList(), moves.Where(move => move.From == LeagueTier.Bronze).Select(move => move.PlayerId).ToList());
+    }
+
+    [Fact]
+    public void SeasonClose_FallsBackToStandingsPlacementsWhenPlayoffPlacementsMissing()
+    {
+        var world = new WorldFactory().CreateNewWorld();
+        SeedStandingsForPlayoffs(world, LeagueTier.Bronze);
+        world.Season.CurrentWeek = world.Config.Season.SeasonCloseWeek;
+
+        new WorldSimulator().ResolveAdministrativeWeek(world, 1);
+
+        Assert.Equal(world.Config.Leagues.PlayersPerLeague, world.Season.FinalPlacements[LeagueTier.Bronze].Count);
+    }
+
+    [Fact]
     public void StandardRotation_MakesOldestSetIllegal()
     {
         var world = new WorldFactory().CreateNewWorld();
@@ -169,6 +225,118 @@ public sealed class MvpSystemsTests
 
         Assert.DoesNotContain(legendaryId, set.UnissuedLegendaryIds);
         Assert.Contains(legendaryId, set.HiddenCollectorLegendaryIds);
+    }
+
+    [Fact]
+    public void SellingLegendaryToCollector_PaysPlayerAndMovesCardToHiddenInventory()
+    {
+        var world = new WorldFactory().CreateNewWorld();
+        var player = world.Players.Values.Single(item => item.IsHuman);
+        var setId = world.StandardSetIds.Last();
+        var legendaryId = world.CardSets[setId].UnissuedLegendaryIds.First();
+        var owned = WorldFactory.GrantCard(world, player, legendaryId);
+        var beforeCash = player.Cash;
+
+        var sold = CollectorService.SellToCollector(world, player.Id, owned.InstanceId);
+
+        Assert.True(sold);
+        Assert.DoesNotContain(player.Collection, card => card.InstanceId == owned.InstanceId);
+        Assert.Equal(beforeCash + CollectorService.GetCollectorBuybackPrice(world, legendaryId), player.Cash);
+        Assert.Equal(LegendaryState.HiddenCollectorHeld, world.CollectorInventory.LegendaryStates[legendaryId]);
+        Assert.Contains(legendaryId, world.CardSets[setId].HiddenCollectorLegendaryIds);
+        Assert.DoesNotContain(legendaryId, world.CardSets[setId].UnissuedLegendaryIds);
+    }
+
+    [Fact]
+    public void HiddenLegendaryChampion_CanRelistInChampionSlot()
+    {
+        var (world, targetId) = CreateHiddenLegendaryRelistWorld(CardType.Champion);
+        var method = typeof(CollectorService).GetMethod("PickCollectorSingleCard", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+        var args = new object[] { world, world.StandardSetIds.Last(), CardType.Champion, new SeededRng(1), new HashSet<string>(StringComparer.Ordinal), false };
+
+        var selected = (string?)method.Invoke(null, args);
+
+        Assert.Equal(targetId, selected);
+    }
+
+    [Fact]
+    public void HiddenNonChampionLegendary_CanRelistInMatchingNonChampionSlot()
+    {
+        var (world, targetId) = CreateHiddenLegendaryRelistWorld(CardType.Unit);
+        var method = typeof(CollectorService).GetMethod("PickCollectorSingleCard", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+        var args = new object[] { world, world.StandardSetIds.Last(), CardType.Unit, new SeededRng(1), new HashSet<string>(StringComparer.Ordinal), false };
+
+        var selected = (string?)method.Invoke(null, args);
+
+        Assert.Equal(targetId, selected);
+    }
+
+    [Fact]
+    public void ChampionSlots_NeverRelistNonChampionLegendary()
+    {
+        var (world, targetId) = CreateHiddenLegendaryRelistWorld(CardType.Unit);
+        var method = typeof(CollectorService).GetMethod("PickCollectorSingleCard", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+        var args = new object[] { world, world.StandardSetIds.Last(), CardType.Champion, new SeededRng(1), new HashSet<string>(StringComparer.Ordinal), false };
+
+        var selected = (string?)method.Invoke(null, args);
+
+        Assert.NotEqual(targetId, selected);
+    }
+
+    [Fact]
+    public void WinningBidReservesCash_AndOutbidReleasesIt()
+    {
+        var world = new WorldFactory().CreateNewWorld();
+        var seller = world.Players.Values.Single(player => player.IsHuman);
+        var bidder = world.Players["PLY002"];
+        bidder.Cash = 100;
+        var outbidder = world.Players["PLY003"];
+        var cardOne = WorldFactory.GrantCard(world, seller, seller.Collection.First(entry => world.GetLatestDefinition(entry.CardId).Type != CardType.Champion).CardId);
+        var listingOne = MarketService.CreateAuctionListing(world, seller.Id, cardOne.InstanceId, 40)!;
+
+        Assert.True(MarketService.PlaceBid(world, bidder.Id, listingOne.Id, 60));
+        Assert.Equal(40, MarketService.GetAvailableCashForBids(world, bidder.Id));
+
+        Assert.True(MarketService.PlaceBid(world, outbidder.Id, listingOne.Id, 70));
+        Assert.Equal(100, MarketService.GetAvailableCashForBids(world, bidder.Id));
+    }
+
+    [Fact]
+    public void FreedCashCanBeUsedOnAnotherListingAfterOutbid()
+    {
+        var world = new WorldFactory().CreateNewWorld();
+        var seller = world.Players.Values.Single(player => player.IsHuman);
+        var bidder = world.Players["PLY002"];
+        bidder.Cash = 100;
+        var outbidder = world.Players["PLY003"];
+        var cardOne = WorldFactory.GrantCard(world, seller, seller.Collection.First(entry => world.GetLatestDefinition(entry.CardId).Type != CardType.Champion).CardId);
+        var cardTwo = WorldFactory.GrantCard(world, seller, seller.Collection.First(entry => world.GetLatestDefinition(entry.CardId).Type != CardType.Champion).CardId);
+        var listingOne = MarketService.CreateAuctionListing(world, seller.Id, cardOne.InstanceId, 60)!;
+        var listingTwo = MarketService.CreateAuctionListing(world, seller.Id, cardTwo.InstanceId, 60)!;
+
+        Assert.True(MarketService.PlaceBid(world, bidder.Id, listingOne.Id, 60));
+        Assert.True(MarketService.PlaceBid(world, outbidder.Id, listingOne.Id, 70));
+        Assert.True(MarketService.PlaceBid(world, bidder.Id, listingTwo.Id, 60));
+    }
+
+    [Fact]
+    public void ReservationTotal_ReflectsOnlyCurrentWinningBids()
+    {
+        var world = new WorldFactory().CreateNewWorld();
+        var seller = world.Players.Values.Single(player => player.IsHuman);
+        var bidder = world.Players["PLY002"];
+        bidder.Cash = 200;
+        var other = world.Players["PLY003"];
+        var cardOne = WorldFactory.GrantCard(world, seller, seller.Collection.First(entry => world.GetLatestDefinition(entry.CardId).Type != CardType.Champion).CardId);
+        var cardTwo = WorldFactory.GrantCard(world, seller, seller.Collection.First(entry => world.GetLatestDefinition(entry.CardId).Type != CardType.Champion).CardId);
+        var listingOne = MarketService.CreateAuctionListing(world, seller.Id, cardOne.InstanceId, 60)!;
+        var listingTwo = MarketService.CreateAuctionListing(world, seller.Id, cardTwo.InstanceId, 50)!;
+
+        Assert.True(MarketService.PlaceBid(world, bidder.Id, listingOne.Id, 60));
+        Assert.True(MarketService.PlaceBid(world, bidder.Id, listingTwo.Id, 50));
+        Assert.True(MarketService.PlaceBid(world, other.Id, listingOne.Id, 70));
+
+        Assert.Equal(150, MarketService.GetAvailableCashForBids(world, bidder.Id));
     }
 
     [Fact]
@@ -523,5 +691,19 @@ public sealed class MvpSystemsTests
         };
 
         return world;
+    }
+
+    private static (World World, string TargetId) CreateHiddenLegendaryRelistWorld(CardType family)
+    {
+        var world = new WorldFactory().CreateNewWorld();
+        var setId = world.StandardSetIds.Last();
+        var target = world.CardVersions.Values
+            .Select(list => list.Last().Definition)
+            .First(card => string.Equals(card.SetId, setId, StringComparison.Ordinal) && card.Rarity == CardRarity.Legendary && card.Type == family);
+        world.CardSets[setId].HiddenCollectorLegendaryIds.Clear();
+        world.CardSets[setId].HiddenCollectorLegendaryIds.Add(target.Id);
+        world.CardSets[setId].UnissuedLegendaryIds.Remove(target.Id);
+        world.CollectorInventory.LegendaryStates[target.Id] = LegendaryState.HiddenCollectorHeld;
+        return (world, target.Id);
     }
 }

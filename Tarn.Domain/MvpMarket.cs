@@ -141,6 +141,14 @@ public static class CollectorService
         }
 
         player.Collection.Remove(owned);
+        var definition = world.GetLatestDefinition(owned.CardId);
+        if (definition.Rarity == CardRarity.Legendary)
+        {
+            world.CollectorInventory.LegendaryStates[owned.CardId] = LegendaryState.HiddenCollectorHeld;
+            world.CardSets[definition.SetId].HiddenCollectorLegendaryIds.Add(owned.CardId);
+            world.CardSets[definition.SetId].UnissuedLegendaryIds.Remove(owned.CardId);
+        }
+
         player.Cash += GetCollectorBuybackPrice(world, owned.CardId);
         return true;
     }
@@ -262,9 +270,14 @@ public static class CollectorService
         var set = world.CardSets[setId];
         var hiddenLegendaryIds = set.HiddenCollectorLegendaryIds
             .Where(cardId => !justHidden.Contains(cardId))
+            .Where(cardId =>
+            {
+                var definition = world.GetLatestDefinition(cardId);
+                return definition.Rarity == CardRarity.Legendary && definition.Type == family;
+            })
             .OrderBy(cardId => cardId, StringComparer.Ordinal)
             .ToList();
-        if (hiddenLegendaryIds.Count > 0 && family == CardType.Champion)
+        if (hiddenLegendaryIds.Count > 0)
         {
             isLegendaryReveal = true;
             return hiddenLegendaryIds[rng.NextInt(hiddenLegendaryIds.Count)];
@@ -420,12 +433,18 @@ public static class MarketService
         return world.MarketListings
             .Where(listing => listing.Status == ListingStatus.Active)
             .Where(listing => !string.Equals(listing.Id, excludingListingId, StringComparison.Ordinal))
-            .Select(listing => listing.Bids
-                .Where(bid => string.Equals(bid.PlayerId, playerId, StringComparison.Ordinal))
-                .OrderByDescending(bid => bid.Amount)
-                .FirstOrDefault())
+            .Select(GetCurrentWinningBid)
+            .Where(bid => bid is not null && string.Equals(bid.PlayerId, playerId, StringComparison.Ordinal))
             .Where(bid => bid is not null)
             .Sum(bid => bid!.Amount);
+    }
+
+    private static Bid? GetCurrentWinningBid(MarketListing listing)
+    {
+        return listing.Bids
+            .OrderByDescending(bid => bid.Amount)
+            .ThenBy(bid => bid.PlayerId, StringComparer.Ordinal)
+            .FirstOrDefault();
     }
 
     private static bool CanList(World world, Player player, OwnedCard card)
