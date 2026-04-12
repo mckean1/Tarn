@@ -132,7 +132,8 @@ public sealed class DeckDefinition
     public ChampionDefinition Champion { get; }
     public IReadOnlyList<CardDefinition> MainDeck { get; }
 
-    public int TotalPower => Champion.Power + MainDeck.Sum(card => card.Power);
+    public int MainDeckPower => MainDeck.Sum(card => card.Power);
+    public int TotalPower => Champion.Power + MainDeckPower;
 
     public void Validate()
     {
@@ -155,7 +156,7 @@ public sealed class DeckDefinition
             throw new InvalidOperationException($"Card '{overLimit.Key}' exceeds the three-copy limit.");
         }
 
-        if (TotalPower > 100)
+        if (MainDeckPower > 100)
         {
             throw new InvalidOperationException("Deck exceeds the permanent 100 power cap.");
         }

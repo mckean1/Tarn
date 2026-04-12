@@ -3,11 +3,35 @@ namespace Tarn.Domain;
 public sealed class MatchSettings
 {
     public int Seed { get; init; } = 12345;
-    public int MaximumRoundsPerGame { get; init; } = 200;
+    public int? DebugRoundLimit { get; init; }
 }
 
 public sealed class GameEngine
 {
+    private sealed record CombatCardSnapshot(
+        string InstanceId,
+        long PlayOrder,
+        Keyword Keywords,
+        int CurrentAttack,
+        bool MarkedForDestruction);
+
+    private sealed class DeferredEvent
+    {
+        public required TriggerEventType EventType { get; init; }
+        public required string SourcePlayerId { get; init; }
+        public string? SourceCardId { get; init; }
+        public string? SourceInstanceId { get; init; }
+        public required string Message { get; init; }
+    }
+
+    private sealed class ResolutionBatchContext
+    {
+        public required IReadOnlyDictionary<string, IReadOnlyList<CombatCardSnapshot>> SnapshotBoards { get; init; }
+        public List<CombatCardState> PendingUnits { get; } = [];
+        public List<CounterState> PendingCounters { get; } = [];
+        public List<DeferredEvent> DeferredEvents { get; } = [];
+    }
+
     public GameState CreateGame(
         string higherSeedPlayerId,
         string playerOneId,
@@ -38,13 +62,13 @@ public sealed class GameEngine
         };
     }
 
-    public string PlayGame(GameState state, int maximumRounds = 200)
+    public string PlayGame(GameState state, int? debugRoundLimit = null)
     {
         while (state.WinnerPlayerId is null)
         {
-            if (state.RoundNumber >= maximumRounds)
+            if (debugRoundLimit is int limit && state.RoundNumber >= limit)
             {
-                throw new InvalidOperationException("Exceeded round limit while simulating Tarn game.");
+                throw new InvalidOperationException("Debug safeguard exceeded round limit while simulating Tarn game.");
             }
 
             PlayRound(state);
@@ -78,7 +102,7 @@ public sealed class GameEngine
                 settings.Seed,
                 gameNumber);
 
-            var winnerId = PlayGame(state, settings.MaximumRoundsPerGame);
+            var winnerId = PlayGame(state, settings.DebugRoundLimit);
             if (winnerId == playerOneId)
             {
                 playerOneWins++;
@@ -208,6 +232,7 @@ public sealed class GameEngine
             return;
         }
 
+        var context = CreateResolutionBatchContext(state);
         var orderedBatch = batch
             .OrderBy(item => item.PlayerId == state.PriorityPlayerId ? 0 : 1)
             .ToList();
@@ -217,23 +242,76 @@ public sealed class GameEngine
             switch (played.Card)
             {
                 case UnitDefinition unit:
-                    ResolveUnit(state, played.PlayerId, unit);
+                    ResolveUnit(state, played.PlayerId, unit, context);
                     break;
                 case SpellDefinition spell:
-                    ResolveSpell(state, played.PlayerId, spell);
+                    ResolveSpell(state, played.PlayerId, spell, context);
                     break;
                 case CounterDefinition counter:
-                    ResolveCounterCard(state, played.PlayerId, counter);
+                    ResolveCounterCard(state, played.PlayerId, counter, context);
                     break;
                 case ChampionDefinition:
                     throw new InvalidOperationException("Champion cards do not resolve from the deck.");
             }
         }
+
+        CommitSimultaneousBatch(state, context);
     }
 
-    private static void ResolveUnit(GameState state, string playerId, UnitDefinition unit)
+    private static ResolutionBatchContext CreateResolutionBatchContext(GameState state)
     {
-        var player = state.GetPlayer(playerId);
+        var snapshots = state.Players.ToDictionary(
+            player => player.Id,
+            player => (IReadOnlyList<CombatCardSnapshot>)player.Board
+                .Select(unit => new CombatCardSnapshot(
+                    unit.InstanceId,
+                    unit.PlayOrder,
+                    unit.Keywords,
+                    unit.CurrentAttack,
+                    unit.MarkedForDestruction))
+                .OrderBy(unit => unit.PlayOrder)
+                .ToList(),
+            StringComparer.Ordinal);
+
+        return new ResolutionBatchContext
+        {
+            SnapshotBoards = snapshots,
+        };
+    }
+
+    private static void CommitSimultaneousBatch(GameState state, ResolutionBatchContext context)
+    {
+        foreach (var unit in context.PendingUnits.OrderBy(unit => unit.PlayOrder))
+        {
+            state.GetPlayer(unit.OwnerId).Board.Add(unit);
+        }
+
+        FlushDeferredEvents(state, context.DeferredEvents);
+
+        foreach (var counter in context.PendingCounters.OrderBy(counter => counter.PlayOrder))
+        {
+            counter.SetSequence = state.Sequence;
+            state.GetPlayer(counter.OwnerId).Counters.Add(counter);
+            Log(state, $"Counter {counter.Definition.Id} is set for {counter.OwnerId}.");
+        }
+    }
+
+    private static void FlushDeferredEvents(GameState state, IReadOnlyList<DeferredEvent> deferredEvents)
+    {
+        foreach (var deferredEvent in deferredEvents)
+        {
+            RaiseEvent(
+                state,
+                deferredEvent.EventType,
+                deferredEvent.SourcePlayerId,
+                deferredEvent.SourceCardId,
+                deferredEvent.SourceInstanceId,
+                deferredEvent.Message);
+        }
+    }
+
+    private static void ResolveUnit(GameState state, string playerId, UnitDefinition unit, ResolutionBatchContext? context = null)
+    {
         var instance = new CombatCardState
         {
             InstanceId = $"{playerId}-{unit.Id}-{state.NextSequence()}",
@@ -244,98 +322,139 @@ public sealed class GameEngine
             CurrentHealth = unit.Health,
         };
 
-        ApplyEffects(state, playerId, instance, unit.OnPlayedEffects);
-        player.Board.Add(instance);
-        RaiseEvent(state, TriggerEventType.UnitEnteredPlay, playerId, unit.Id, instance.InstanceId, $"Unit {unit.Id} enters play for {playerId}.");
+        ApplyEffects(state, playerId, instance, unit.OnPlayedEffects, context);
 
         if (unit.Keywords.HasFlag(Keyword.Rally))
         {
-            foreach (var ally in player.Board.Where(card => card.InstanceId != instance.InstanceId && card.CurrentAttack > 0))
+            foreach (var ally in GetAlliedUnitsWithAttack(state, playerId, context))
             {
                 ally.TemporaryAttackModifier += 1;
                 Log(state, $"Rally grants +1 Attack this round to {ally.InstanceId}.");
             }
         }
 
-        RaiseEvent(state, TriggerEventType.CardResolved, playerId, unit.Id, instance.InstanceId, $"Unit {unit.Id} resolves for {playerId}.");
+        if (context is null)
+        {
+            state.GetPlayer(playerId).Board.Add(instance);
+            RaiseEvent(state, TriggerEventType.UnitEnteredPlay, playerId, unit.Id, instance.InstanceId, $"Unit {unit.Id} enters play for {playerId}.");
+            RaiseEvent(state, TriggerEventType.CardResolved, playerId, unit.Id, instance.InstanceId, $"Unit {unit.Id} resolves for {playerId}.");
+            return;
+        }
+
+        context.PendingUnits.Add(instance);
+        context.DeferredEvents.Add(new DeferredEvent
+        {
+            EventType = TriggerEventType.UnitEnteredPlay,
+            SourcePlayerId = playerId,
+            SourceCardId = unit.Id,
+            SourceInstanceId = instance.InstanceId,
+            Message = $"Unit {unit.Id} enters play for {playerId}.",
+        });
+        context.DeferredEvents.Add(new DeferredEvent
+        {
+            EventType = TriggerEventType.CardResolved,
+            SourcePlayerId = playerId,
+            SourceCardId = unit.Id,
+            SourceInstanceId = instance.InstanceId,
+            Message = $"Unit {unit.Id} resolves for {playerId}.",
+        });
     }
 
-    private static void ResolveSpell(GameState state, string playerId, SpellDefinition spell)
+    private static void ResolveSpell(GameState state, string playerId, SpellDefinition spell, ResolutionBatchContext? context = null)
     {
-        ApplyEffects(state, playerId, null, spell.OnPlayedEffects);
-        RaiseEvent(state, TriggerEventType.CardResolved, playerId, spell.Id, null, $"Spell {spell.Id} resolves for {playerId}.");
+        ApplyEffects(state, playerId, null, spell.OnPlayedEffects, context);
+
+        if (context is null)
+        {
+            RaiseEvent(state, TriggerEventType.CardResolved, playerId, spell.Id, null, $"Spell {spell.Id} resolves for {playerId}.");
+            return;
+        }
+
+        context.DeferredEvents.Add(new DeferredEvent
+        {
+            EventType = TriggerEventType.CardResolved,
+            SourcePlayerId = playerId,
+            SourceCardId = spell.Id,
+            SourceInstanceId = null,
+            Message = $"Spell {spell.Id} resolves for {playerId}.",
+        });
     }
 
-    private static void ResolveCounterCard(GameState state, string playerId, CounterDefinition counter)
+    private static void ResolveCounterCard(GameState state, string playerId, CounterDefinition counter, ResolutionBatchContext? context = null)
     {
-        var player = state.GetPlayer(playerId);
         var instance = new CounterState
         {
             InstanceId = $"{playerId}-{counter.Id}-{state.NextSequence()}",
             OwnerId = playerId,
             Definition = counter,
             PlayOrder = state.Sequence,
-            SetSequence = state.Sequence,
+            SetSequence = 0,
         };
 
-        player.Counters.Add(instance);
-        Log(state, $"Counter {counter.Id} is set for {playerId}.");
-        RaiseEvent(state, TriggerEventType.CardResolved, playerId, counter.Id, instance.InstanceId, $"Counter {counter.Id} resolves and waits for {counter.Trigger.EventType}.");
+        if (context is null)
+        {
+            instance.SetSequence = state.Sequence;
+            state.GetPlayer(playerId).Counters.Add(instance);
+            Log(state, $"Counter {counter.Id} is set for {playerId}.");
+            return;
+        }
+
+        context.PendingCounters.Add(instance);
     }
 
-    private static void ApplyEffects(GameState state, string playerId, CombatCardState? source, IReadOnlyList<EffectDefinition> effects)
+    private static void ApplyEffects(GameState state, string playerId, CombatCardState? source, IReadOnlyList<EffectDefinition> effects, ResolutionBatchContext? context = null)
     {
         foreach (var effect in effects)
         {
-            ResolveEffect(state, playerId, source, effect);
+            ResolveEffect(state, playerId, source, effect, context);
         }
     }
 
-    private static void ResolveEffect(GameState state, string playerId, CombatCardState? source, EffectDefinition effect)
+    private static void ResolveEffect(GameState state, string playerId, CombatCardState? source, EffectDefinition effect, ResolutionBatchContext? context = null)
     {
         switch (effect.Type)
         {
             case EffectType.Damage:
-                ResolveDamageEffect(state, playerId, source, effect);
+                ResolveDamageEffect(state, playerId, source, effect, context);
                 break;
             case EffectType.Heal:
-                ResolveHealEffect(state, playerId, source, effect);
+                ResolveHealEffect(state, playerId, source, effect, context);
                 break;
             case EffectType.GrantAttackThisRound:
-                ResolveGrantAttackEffect(state, playerId, source, effect);
+                ResolveGrantAttackEffect(state, playerId, source, effect, context);
                 break;
             case EffectType.PreventAttacksThisRound:
-                ResolvePreventAttackEffect(state, playerId, source, effect);
+                ResolvePreventAttackEffect(state, playerId, source, effect, context);
                 break;
             default:
                 throw new InvalidOperationException($"Unsupported effect type {effect.Type}.");
         }
     }
 
-    private static void ResolveDamageEffect(GameState state, string playerId, CombatCardState? source, EffectDefinition effect)
+    private static void ResolveDamageEffect(GameState state, string playerId, CombatCardState? source, EffectDefinition effect, ResolutionBatchContext? context = null)
     {
         switch (effect.Selector)
         {
             case TargetSelector.EnemyChampion:
-                ApplyDamageToChampion(state, state.GetOpponent(playerId), effect.Amount, source);
+                ApplyDamageToChampion(state, state.GetOpponent(playerId), effect.Amount, source, context);
                 break;
             case TargetSelector.AutoEnemyUnit:
             {
-                var target = SelectAutoTargetUnit(state.GetOpponent(playerId));
+                var target = SelectAutoTargetUnit(state, state.GetOpponent(playerId), context);
                 if (target is not null)
                 {
-                    ApplyDamageToUnit(state, target, effect.Amount, source);
+                    ApplyDamageToUnit(state, target, effect.Amount, source, context);
                 }
 
                 break;
             }
             case TargetSelector.Source when source is not null:
-                ApplyDamageToUnit(state, source, effect.Amount, source);
+                ApplyDamageToUnit(state, source, effect.Amount, source, context);
                 break;
         }
     }
 
-    private static void ResolveHealEffect(GameState state, string playerId, CombatCardState? source, EffectDefinition effect)
+    private static void ResolveHealEffect(GameState state, string playerId, CombatCardState? source, EffectDefinition effect, ResolutionBatchContext? context = null)
     {
         if (effect.Selector == TargetSelector.Source && source is not null)
         {
@@ -343,12 +462,12 @@ public sealed class GameEngine
         }
     }
 
-    private static void ResolveGrantAttackEffect(GameState state, string playerId, CombatCardState? source, EffectDefinition effect)
+    private static void ResolveGrantAttackEffect(GameState state, string playerId, CombatCardState? source, EffectDefinition effect, ResolutionBatchContext? context = null)
     {
         IEnumerable<CombatCardState> targets = effect.Selector switch
         {
             TargetSelector.Source when source is not null => [source],
-            TargetSelector.AlliedUnitsWithAttack => state.GetPlayer(playerId).Board.Where(card => card.CurrentAttack > 0).ToList(),
+            TargetSelector.AlliedUnitsWithAttack => GetAlliedUnitsWithAttack(state, playerId, context),
             _ => [],
         };
 
@@ -359,11 +478,11 @@ public sealed class GameEngine
         }
     }
 
-    private static void ResolvePreventAttackEffect(GameState state, string playerId, CombatCardState? source, EffectDefinition effect)
+    private static void ResolvePreventAttackEffect(GameState state, string playerId, CombatCardState? source, EffectDefinition effect, ResolutionBatchContext? context = null)
     {
         IEnumerable<CombatCardState> targets = effect.Selector switch
         {
-            TargetSelector.AutoEnemyUnit => SelectAutoTargetUnit(state.GetOpponent(playerId)) is { } unit ? [unit] : [],
+            TargetSelector.AutoEnemyUnit => SelectAutoTargetUnit(state, state.GetOpponent(playerId), context) is { } unit ? [unit] : [],
             TargetSelector.Source when source is not null => [source],
             _ => [],
         };
@@ -375,8 +494,27 @@ public sealed class GameEngine
         }
     }
 
-    private static CombatCardState? SelectAutoTargetUnit(PlayerState player)
+    private static IEnumerable<CombatCardState> GetAlliedUnitsWithAttack(GameState state, string playerId, ResolutionBatchContext? context)
     {
+        if (context is null)
+        {
+            return state.GetPlayer(playerId).Board.Where(card => card.CurrentAttack > 0).OrderBy(card => card.PlayOrder).ToList();
+        }
+
+        var player = state.GetPlayer(playerId);
+        return context.SnapshotBoards[playerId]
+            .Where(card => card.CurrentAttack > 0 && !card.MarkedForDestruction)
+            .Select(snapshot => player.Board.First(card => card.InstanceId == snapshot.InstanceId))
+            .ToList();
+    }
+
+    private static CombatCardState? SelectAutoTargetUnit(GameState state, PlayerState player, ResolutionBatchContext? context = null)
+    {
+        if (context is not null)
+        {
+            return SelectAutoTargetUnitFromSnapshot(state, player, context);
+        }
+
         var tauntUnits = player.Board
             .Where(unit => !unit.MarkedForDestruction && unit.Keywords.HasFlag(Keyword.Taunt))
             .OrderBy(unit => unit.PlayOrder)
@@ -391,6 +529,28 @@ public sealed class GameEngine
             .Where(unit => !unit.MarkedForDestruction)
             .OrderBy(unit => unit.PlayOrder)
             .FirstOrDefault();
+    }
+
+    private static CombatCardState? SelectAutoTargetUnitFromSnapshot(GameState state, PlayerState player, ResolutionBatchContext context)
+    {
+        var snapshotUnits = context.SnapshotBoards[player.Id];
+        var tauntTarget = snapshotUnits
+            .Where(unit => !unit.MarkedForDestruction && unit.Keywords.HasFlag(Keyword.Taunt))
+            .OrderBy(unit => unit.PlayOrder)
+            .FirstOrDefault();
+
+        var targetSnapshot = tauntTarget
+            ?? snapshotUnits
+                .Where(unit => !unit.MarkedForDestruction)
+                .OrderBy(unit => unit.PlayOrder)
+                .FirstOrDefault();
+
+        if (targetSnapshot is null)
+        {
+            return null;
+        }
+
+        return player.Board.FirstOrDefault(unit => unit.InstanceId == targetSnapshot.InstanceId);
     }
 
     private static void ResolveAttackStep(GameState state)
@@ -525,7 +685,7 @@ public sealed class GameEngine
         Log(state, $"{player.Id} takes {player.FatigueCount} fatigue damage.");
     }
 
-    private static void ApplyDamageToChampion(GameState state, PlayerState player, int amount, CombatCardState? source)
+    private static void ApplyDamageToChampion(GameState state, PlayerState player, int amount, CombatCardState? source, ResolutionBatchContext? context = null)
     {
         var remaining = amount;
         foreach (var defender in player.Board
@@ -548,14 +708,40 @@ public sealed class GameEngine
         }
 
         player.Champion.CurrentHealth -= remaining;
-        RaiseEvent(state, TriggerEventType.ChampionDamaged, player.Id, source?.Definition.Id, source?.InstanceId, $"Champion for {player.Id} takes {remaining} damage.");
+        if (context is null)
+        {
+            RaiseEvent(state, TriggerEventType.ChampionDamaged, player.Id, source?.Definition.Id, source?.InstanceId, $"Champion for {player.Id} takes {remaining} damage.");
+            return;
+        }
+
+        context.DeferredEvents.Add(new DeferredEvent
+        {
+            EventType = TriggerEventType.ChampionDamaged,
+            SourcePlayerId = player.Id,
+            SourceCardId = source?.Definition.Id,
+            SourceInstanceId = source?.InstanceId,
+            Message = $"Champion for {player.Id} takes {remaining} damage.",
+        });
     }
 
-    private static void ApplyDamageToUnit(GameState state, CombatCardState target, int amount, CombatCardState? source)
+    private static void ApplyDamageToUnit(GameState state, CombatCardState target, int amount, CombatCardState? source, ResolutionBatchContext? context = null)
     {
         target.CurrentHealth -= amount;
         Log(state, $"{target.InstanceId} takes {amount} damage.");
-        RaiseEvent(state, TriggerEventType.CardResolved, target.OwnerId, source?.Definition.Id, source?.InstanceId, $"Damage resolves on {target.InstanceId}.");
+        if (context is null)
+        {
+            RaiseEvent(state, TriggerEventType.CardResolved, target.OwnerId, source?.Definition.Id, source?.InstanceId, $"Damage resolves on {target.InstanceId}.");
+            return;
+        }
+
+        context.DeferredEvents.Add(new DeferredEvent
+        {
+            EventType = TriggerEventType.CardResolved,
+            SourcePlayerId = target.OwnerId,
+            SourceCardId = source?.Definition.Id,
+            SourceInstanceId = source?.InstanceId,
+            Message = $"Damage resolves on {target.InstanceId}.",
+        });
     }
 
     private static void HealCombatant(GameState state, CombatCardState target, int amount)
