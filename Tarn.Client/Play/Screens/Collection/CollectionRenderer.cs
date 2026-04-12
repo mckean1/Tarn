@@ -19,7 +19,9 @@ public static class CollectionRenderer
             "Left/Right changes filter. Enter changes sort.",
         };
         var rows = model.Rows.Select((row, index) =>
-            $"{(index == state.Collection.SelectedIndex ? ">" : " ")} {Layout.Truncate(row.Name, 24)} {row.Type,-9} {row.Rarity,-10} {row.OwnedCount,2}").ToList();
+            ScreenText.InteractiveRow(
+                index == state.Collection.SelectedIndex,
+                $"{Layout.Truncate(row.Name, 24).TrimEnd()} {row.Type,-9} {row.Rarity,-10} {row.OwnedCount,2}")).ToList();
         if (rows.Count == 0)
         {
             rows.Add(ScreenText.EmptyState("Collection", "No cards match this filter.", body.Width));

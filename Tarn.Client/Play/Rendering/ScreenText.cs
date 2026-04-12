@@ -23,4 +23,12 @@ public static class ScreenText
     }
 
     public static string StatusChip(string label) => $"[{label}]";
+
+    public static string InteractiveRow(bool isSelected, string content, string selectedMarker = ">", string unselectedMarker = " ")
+    {
+        var row = $"{(isSelected ? selectedMarker : unselectedMarker)} {content}";
+        return isSelected ? TerminalStyle.Selected(row) : row;
+    }
+
+    public static string Secondary(string text) => TerminalStyle.Secondary(text);
 }

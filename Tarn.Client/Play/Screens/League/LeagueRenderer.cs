@@ -34,7 +34,7 @@ public static class LeagueRenderer
             new TableColumn { Header = "Pts", Width = 4 },
             new TableColumn { Header = "GD", Width = 4 },
             new TableColumn { Header = "Form", Width = 5 },
-        ], rows);
+        ], rows, state.League.SelectedIndex);
 
         var detailLines = new List<string>
         {

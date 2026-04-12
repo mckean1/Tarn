@@ -4,11 +4,19 @@ public sealed class ScheduleState
 {
     public int SelectedWeek { get; set; }
     public int SelectedFixtureIndex { get; set; }
+    public string FocusLeagueLabel { get; set; } = string.Empty;
     public IReadOnlyList<ScheduleFixtureItem> Fixtures { get; set; } = [];
     public ScheduleFixtureDetail? Detail { get; set; }
 }
 
-public sealed record ScheduleFixtureItem(string MatchId, string Summary, bool ReplayAvailable);
+public sealed record ScheduleFixtureItem(
+    string MatchId,
+    string LeagueLabel,
+    string Pairing,
+    string Status,
+    string Result,
+    bool ReplayAvailable,
+    bool IsPlayerFixture);
 
 public sealed record ScheduleFixtureDetail(
     string MatchId,

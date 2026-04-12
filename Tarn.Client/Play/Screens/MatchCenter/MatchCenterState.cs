@@ -16,16 +16,21 @@ public sealed record MatchReplayViewModel(
     string Title,
     string Initiative,
     string Result,
+    IReadOnlyList<string> ReplayInfoLines,
     IReadOnlyList<string> EventLog,
     IReadOnlyList<RoundSnapshotViewModel> RoundSnapshots);
 
 public sealed record RoundSnapshotViewModel(
     int RoundNumber,
+    string RoundLabel,
     string BattleStateLabel,
-    ChampionPanelViewModel PlayerOne,
-    ChampionPanelViewModel PlayerTwo,
-    IReadOnlyList<string> BattlefieldLines,
-    IReadOnlyList<string> CounterLines,
+    string InitiativeLabel,
+    ChampionPanelViewModel Home,
+    ChampionPanelViewModel Away,
+    IReadOnlyList<string> HomeBoardLines,
+    IReadOnlyList<string> AwayBoardLines,
+    string HomeCounterSummary,
+    string AwayCounterSummary,
     int LastLogIndexExclusive);
 
-public sealed record ChampionPanelViewModel(string Label, int Health, int Fatigue);
+public sealed record ChampionPanelViewModel(string SideLabel, string PlayerName, string ChampionName, int Health, int Fatigue);

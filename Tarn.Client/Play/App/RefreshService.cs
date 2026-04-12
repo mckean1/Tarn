@@ -56,6 +56,7 @@ public sealed class RefreshService
         var viewModel = scheduleQueries.Build(world, state.Schedule.SelectedWeek, state.Schedule.SelectedFixtureIndex, state.HumanPlayerId);
         state.Schedule.SelectedWeek = viewModel.SelectedWeek;
         state.Schedule.SelectedFixtureIndex = viewModel.SelectedFixtureIndex;
+        state.Schedule.FocusLeagueLabel = viewModel.FocusLeagueLabel;
         state.Schedule.Fixtures = viewModel.Fixtures;
         state.Schedule.Detail = viewModel.Detail;
     }

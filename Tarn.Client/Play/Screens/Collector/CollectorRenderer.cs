@@ -34,7 +34,9 @@ public static class CollectorRenderer
         else
         {
             lines.AddRange(model.Rows.Take(Math.Max(1, body.Height - 8)).Select((row, index) =>
-                $"{(index == state.Collector.SelectedIndex ? ">" : " ")} {Layout.Truncate(row.Name, 22)} {row.Type,-10} {row.Rarity,-10} {row.Price,4} {row.Status}"));
+                ScreenText.InteractiveRow(
+                    index == state.Collector.SelectedIndex,
+                    $"{Layout.Truncate(row.Name, 22).TrimEnd()} {row.Type,-10} {row.Rarity,-10} {row.Price,4} {row.Status}")));
         }
 
         if (model.Detail is not null)

@@ -25,8 +25,7 @@ public static class WeekSummaryRenderer
         builder.AppendLine("Actions");
         for (var index = 0; index < summary.Actions.Count; index++)
         {
-            var marker = index == state.WeekSummary.SelectedActionIndex ? ">" : " ";
-            builder.AppendLine($"{marker} {summary.Actions[index]}");
+            builder.AppendLine(ScreenText.InteractiveRow(index == state.WeekSummary.SelectedActionIndex, summary.Actions[index]));
         }
 
         return ScreenText.FitBlock(builder.ToString(), body.Width, body.Height);

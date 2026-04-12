@@ -1,4 +1,5 @@
 using Tarn.ClientApp.Play.App;
+using Tarn.ClientApp.Play.Queries;
 using Tarn.ClientApp.Play.Rendering;
 using Tarn.Domain;
 
@@ -7,24 +8,65 @@ namespace Tarn.Client.Tests;
 public sealed class ChromeRendererTests
 {
     [Fact]
-    public void HeaderIncludesWeekPlayerLeagueAndCash()
+    public void HeaderIncludesTitleSeasonLeagueAndCashAsOneLine()
     {
         var state = BuildState();
         var output = HeaderRenderer.Render(state, 80);
 
-        Assert.Contains("Tarn Play", output);
-        Assert.Contains("Year 1, Week 1", output);
-        Assert.Contains("You", output);
+        Assert.Contains("Dashboard", output);
+        Assert.Contains("Year 1 Week 1", output);
         Assert.Contains("Bronze", output);
         Assert.Contains($"Cash {state.HumanPlayer.Cash}", output);
+        Assert.DoesNotContain("You", output);
+        Assert.DoesNotContain("1 Dash", output);
     }
 
     [Fact]
-    public void FooterUsesScreenSpecificControls()
+    public void FooterUsesSimplifiedDashboardControlsAndSecondaryJumps()
+    {
+        var output = FooterRenderer.Render(ScreenId.Dashboard, 80);
+        Assert.Contains("↑↓ Move", output);
+        Assert.Contains("Enter Select", output);
+        Assert.Contains("Advance Week", output);
+        Assert.Contains("Screens 1 Dash", output);
+        Assert.DoesNotContain("Jump:", output);
+    }
+
+    [Fact]
+    public void ScheduleFooterKeepsPrimaryControlsConcise()
+    {
+        var output = FooterRenderer.Render(ScreenId.Schedule, 80);
+
+        Assert.Contains("↑↓ Move", output);
+        Assert.Contains("←→ Week", output);
+        Assert.Contains("Enter Replay", output);
+        Assert.Contains("Esc Back", output);
+        Assert.Contains("? Help", output);
+    }
+
+    [Fact]
+    public void MatchCenterFooterUsesBattleFocusedControls()
     {
         var output = FooterRenderer.Render(ScreenId.MatchCenter, 80);
-        Assert.Contains("N event", output);
-        Assert.Contains("P autoplay", output);
+
+        Assert.Contains("N Next", output);
+        Assert.Contains("R Round", output);
+        Assert.Contains("P Autoplay", output);
+        Assert.Contains("Esc Back", output);
+        Assert.Contains("? Help", output);
+    }
+
+    [Fact]
+    public void HeaderUsesViewedScheduleWeekWhenScheduleIsActive()
+    {
+        var state = BuildState();
+        state.ActiveScreen = ScreenId.Schedule;
+        state.Schedule.SelectedWeek = 3;
+
+        var output = HeaderRenderer.Render(state, 80);
+
+        Assert.Contains("Schedule", output);
+        Assert.Contains("Year 1 Week 3", output);
     }
 
     [Fact]
@@ -60,6 +102,52 @@ public sealed class ChromeRendererTests
         var output = ScreenText.EmptyState("No Replay", "Finish a fixture, then open it from Schedule.", 60);
         Assert.Contains("[No Replay]", output);
         Assert.Contains("Finish a fixture", output);
+    }
+
+    [Fact]
+    public void AppRendererWrapsDashboardInBoxedChrome()
+    {
+        var state = BuildState();
+        state.Dashboard.SelectedActionIndex = 1;
+        state.Dashboard.ViewModel = new DashboardQueries().Build(state.World, state.HumanPlayerId);
+
+        var output = new AppRenderer().Render(state);
+        var plainOutput = AnsiUtility.StripAnsi(output);
+        var lines = plainOutput.Split(Environment.NewLine);
+
+        Assert.Contains("┌ TARN ", plainOutput);
+        Assert.Contains("Dashboard · Year 1 Week 1 · Bronze", plainOutput);
+        Assert.Contains("Season Status", plainOutput);
+        Assert.Contains("Recommended Actions", plainOutput);
+        Assert.Contains("├", plainOutput);
+        Assert.Contains("└", plainOutput);
+        Assert.Equal(state.WindowHeight, lines.Length);
+        Assert.All(lines.Take(state.WindowHeight), line => Assert.Equal(state.WindowWidth, AnsiUtility.GetVisibleLength(line)));
+        Assert.StartsWith("┌", lines[0]);
+        Assert.StartsWith("├", lines[2]);
+        Assert.StartsWith("├", lines[^4]);
+        Assert.StartsWith("└", lines[^1]);
+    }
+
+    [Fact]
+    public void AppRendererRecomputesFrameWhenWindowSizeChanges()
+    {
+        var state = BuildState();
+        state.Dashboard.ViewModel = new DashboardQueries().Build(state.World, state.HumanPlayerId);
+        var renderer = new AppRenderer();
+
+        state.WindowWidth = 90;
+        state.WindowHeight = 20;
+        var narrow = AnsiUtility.StripAnsi(renderer.Render(state)).Split(Environment.NewLine);
+
+        state.WindowWidth = 110;
+        state.WindowHeight = 24;
+        var wide = AnsiUtility.StripAnsi(renderer.Render(state)).Split(Environment.NewLine);
+
+        Assert.Equal(20, narrow.Length);
+        Assert.Equal(24, wide.Length);
+        Assert.All(narrow, line => Assert.Equal(90, AnsiUtility.GetVisibleLength(line)));
+        Assert.All(wide, line => Assert.Equal(110, AnsiUtility.GetVisibleLength(line)));
     }
 
     private static AppState BuildState()

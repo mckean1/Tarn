@@ -139,6 +139,31 @@ public sealed class MvpSystemsTests
     }
 
     [Fact]
+    public void SaveLoad_PreservesHistoricalReplaySetupForResolvedFixtures()
+    {
+        var world = new WorldFactory().CreateNewWorld();
+        var fixture = world.Season.Schedule.First(match => match.Week == world.Season.CurrentWeek);
+        fixture.Result = new WorldSimulator().SimulateMatch(world, fixture, (world.Season.Year * 1000) + world.Season.CurrentWeek + fixture.FixturePriority);
+        var path = Path.GetTempFileName();
+
+        try
+        {
+            WorldStorage.Save(world, path);
+            var loaded = WorldStorage.Load(path);
+            var loadedFixture = loaded.Season.Schedule.First(match => string.Equals(match.Id, fixture.Id, StringComparison.Ordinal));
+
+            Assert.NotNull(loadedFixture.ReplaySetup);
+            Assert.Equal(fixture.ReplaySetup!.Seed, loadedFixture.ReplaySetup!.Seed);
+            Assert.Equal(fixture.ReplaySetup.HomeDeck.ChampionCardId, loadedFixture.ReplaySetup.HomeDeck.ChampionCardId);
+            Assert.Equal(fixture.ReplaySetup.AwayDeck.NonChampionCardIds, loadedFixture.ReplaySetup.AwayDeck.NonChampionCardIds);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void PromotionRelegation_UsesPlayoffBasedFinalPlacements()
     {
         var world = new WorldFactory().CreateNewWorld();

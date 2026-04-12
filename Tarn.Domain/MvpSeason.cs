@@ -91,6 +91,7 @@ public sealed class WorldSimulator
         var away = world.Players[fixture.AwayPlayerId];
         var homeDeck = home.ActiveDeck ?? throw new InvalidOperationException($"Player '{home.Id}' has no deck.");
         var awayDeck = away.ActiveDeck ?? throw new InvalidOperationException($"Player '{away.Id}' has no deck.");
+        fixture.ReplaySetup = BuildHistoricalReplaySetup(world, fixture, home, homeDeck, away, awayDeck, seed);
         var bestOf = fixture.PlayoffRound == MatchRoundType.Final ? 5 : fixture.Phase == MatchPhase.Playoffs ? 3 : 3;
         var targetWins = (bestOf / 2) + 1;
         var homeWins = 0;
@@ -250,6 +251,28 @@ public sealed class WorldSimulator
             PlayerOneId = "P1",
             PlayerTwoId = "P2",
             Initiative = BuildInitiativeContext(fixture),
+        };
+    }
+
+    private HistoricalMatchSetup BuildHistoricalReplaySetup(World world, Match fixture, Player home, SubmittedDeck homeDeck, Player away, SubmittedDeck awayDeck, int seed)
+    {
+        return new HistoricalMatchSetup
+        {
+            Seed = seed,
+            HomeDeck = BuildHistoricalDeckSetup(home, homeDeck),
+            AwayDeck = BuildHistoricalDeckSetup(away, awayDeck),
+            Initiative = BuildInitiativeContext(fixture),
+        };
+    }
+
+    private static HistoricalDeckSetup BuildHistoricalDeckSetup(Player player, SubmittedDeck deck)
+    {
+        return new HistoricalDeckSetup
+        {
+            ChampionCardId = player.Collection.First(card => card.InstanceId == deck.ChampionInstanceId).CardId,
+            NonChampionCardIds = deck.NonChampionInstanceIds
+                .Select(id => player.Collection.First(card => card.InstanceId == id).CardId)
+                .ToList(),
         };
     }
 

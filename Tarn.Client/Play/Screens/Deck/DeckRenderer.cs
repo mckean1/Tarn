@@ -32,7 +32,7 @@ public static class DeckRenderer
                 lines.Add(currentGroup);
             }
 
-            lines.Add($"{(index == state.Deck.SelectedIndex ? ">" : " ")} {entry.Name} [{entry.Rarity}]");
+            lines.Add(ScreenText.InteractiveRow(index == state.Deck.SelectedIndex, $"{entry.Name} [{entry.Rarity}]"));
         }
 
         if (model.Detail is not null)

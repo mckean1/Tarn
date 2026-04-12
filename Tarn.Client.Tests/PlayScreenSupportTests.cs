@@ -58,6 +58,39 @@ public sealed class PlayScreenSupportTests
         Assert.Equal("Gamma ", lines[1]);
     }
 
+    [Fact]
+    public void FrameRedrawTrackerInvalidatesOnResizeAndRefresh()
+    {
+        var state = BuildState();
+        var tracker = new FrameRedrawTracker();
+
+        Assert.True(tracker.UpdateWindow(state, 121, 41));
+        Assert.True(tracker.BeginRender(state));
+        Assert.False(tracker.BeginRender(state));
+
+        tracker.Invalidate();
+        Assert.True(tracker.BeginRender(state));
+
+        Assert.True(tracker.UpdateWindow(state, 100, 30));
+        Assert.True(tracker.BeginRender(state));
+        Assert.Equal(100, state.WindowWidth);
+        Assert.Equal(30, state.WindowHeight);
+    }
+
+    [Fact]
+    public void FrameRedrawTrackerInvalidatesOnScreenTransition()
+    {
+        var state = BuildState();
+        var tracker = new FrameRedrawTracker();
+
+        tracker.UpdateWindow(state, 121, 41);
+        tracker.BeginRender(state);
+
+        state.ActiveScreen = ScreenId.Schedule;
+
+        Assert.True(tracker.BeginRender(state));
+    }
+
     private static AppState BuildState()
     {
         var world = new WorldFactory().CreateNewWorld(1, "You");

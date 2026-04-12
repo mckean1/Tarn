@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "Tarn.Client": {
+      "commandName": "Project",
+      "commandLineArgs": "play"
+    }
+  }
+}

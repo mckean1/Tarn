@@ -7,13 +7,17 @@ public static class HeaderRenderer
     public static string Render(AppState state, int width)
     {
         var player = state.HumanPlayer;
-        var line1 = Layout.Truncate(state.IsNarrowLayout ? "Tarn Play [Compact]" : "Tarn Play", width);
-        var line2 = Layout.Truncate($"Year {state.World.Season.Year}, Week {state.World.Season.CurrentWeek} | {player.Name} | {player.League}", width);
-        var line3 = Layout.Truncate(
-            PlayScreenCatalog.BuildGlobalNavigationText(
-                state.IsNarrowLayout,
-                state.IsNarrowLayout ? $"Cash {player.Cash} | " : $"Cash {player.Cash} | Screens: "),
-            width);
-        return string.Join(Environment.NewLine, [line1, line2, line3]);
+        var screen = PlayScreenCatalog.Get(state.ActiveScreen);
+        var viewedWeek = state.ActiveScreen == ScreenId.Schedule && state.Schedule.SelectedWeek > 0
+            ? state.Schedule.SelectedWeek
+            : state.World.Season.CurrentWeek;
+        var segments = new[]
+        {
+            screen.Title,
+            $"Year {state.World.Season.Year} Week {viewedWeek}",
+            player.League.ToString(),
+            $"Cash {player.Cash}",
+        };
+        return Layout.Truncate(string.Join(" · ", segments), width);
     }
 }

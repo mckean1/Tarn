@@ -36,7 +36,9 @@ public static class MarketRenderer
         else
         {
             lines.AddRange(model.Rows.Take(Math.Max(1, body.Height - 9)).Select((row, index) =>
-                $"{(index == state.Market.SelectedIndex ? ">" : " ")} {Layout.Truncate(row.CardName, 20)} {Layout.Truncate(row.Seller, 10)} {row.CurrentBid,4} {Layout.Truncate(row.TimeLeft, 14)} {row.BidCount,3} {row.Status}"));
+                ScreenText.InteractiveRow(
+                    index == state.Market.SelectedIndex,
+                    $"{Layout.Truncate(row.CardName, 20).TrimEnd()} {Layout.Truncate(row.Seller, 10).TrimEnd()} {row.CurrentBid,4} {Layout.Truncate(row.TimeLeft, 14).TrimEnd()} {row.BidCount,3} {row.Status}")));
         }
 
         if (model.Detail is not null)

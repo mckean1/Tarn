@@ -16,6 +16,7 @@ public sealed class PlayApp
 {
     private readonly RefreshService refreshService = new();
     private readonly ActionExecutor actionExecutor;
+    private readonly FrameRedrawTracker frameRedrawTracker = new();
     private readonly AppRenderer renderer = new();
     private readonly AppState state;
 
@@ -34,6 +35,14 @@ public sealed class PlayApp
             {
                 UpdateWindowSize();
                 Render();
+
+                if (!ReplayAutoplay.WaitForInputOrTick(state))
+                {
+                    TickMessageBar();
+                    ReplayAutoplay.AdvanceTick(state);
+                    continue;
+                }
+
                 HandleInput(Console.ReadKey(intercept: true));
             }
         }
@@ -72,6 +81,7 @@ public sealed class PlayApp
                 return;
             case InputAction.ToggleHelp:
                 state.Modal = BuildHelpModal();
+                frameRedrawTracker.Invalidate();
                 return;
         }
 
@@ -85,6 +95,7 @@ public sealed class PlayApp
         {
             state.Modal = null;
             state.MessageBar = new MessageBarState(MessageSeverity.Info, "Closed.");
+            frameRedrawTracker.Invalidate();
             return;
         }
 
@@ -96,9 +107,12 @@ public sealed class PlayApp
 
     private void ApplyResult(ScreenControllerResult result)
     {
+        var requiresFullRedraw = false;
+
         if (result.Modal is not null)
         {
             state.Modal = result.Modal;
+            requiresFullRedraw = true;
         }
 
         if (result.Message is not null)
@@ -109,25 +123,34 @@ public sealed class PlayApp
         if (result.NavigateTo is { } screen)
         {
             NavigateToScreen(screen);
+            requiresFullRedraw = true;
         }
 
         if (result.RequiresRefresh)
         {
             refreshService.RefreshAll(state);
+            requiresFullRedraw = true;
+        }
+
+        if (requiresFullRedraw)
+        {
+            frameRedrawTracker.Invalidate();
         }
     }
 
     private void Render()
     {
-        TrySetCursorPosition(0, 0);
-        Console.Write(renderer.Render(state));
+        if (frameRedrawTracker.BeginRender(state))
+        {
+            TryClear();
+        }
+
+        WriteFrame(renderer.Render(state));
     }
 
     private void UpdateWindowSize()
     {
-        state.WindowWidth = Math.Max(60, Console.WindowWidth);
-        state.WindowHeight = Math.Max(24, Console.WindowHeight);
-        state.IsNarrowLayout = state.WindowWidth < 100;
+        frameRedrawTracker.UpdateWindow(state, Console.WindowWidth, Console.WindowHeight);
     }
 
     private ModalState BuildHelpModal()
@@ -158,6 +181,7 @@ public sealed class PlayApp
         NavigationService.Navigate(state, screenId);
         var screen = PlayScreenCatalog.Get(screenId);
         screen.Refresh?.Invoke(refreshService, state);
+        frameRedrawTracker.Invalidate();
     }
 
     private void TickMessageBar()
@@ -205,5 +229,17 @@ public sealed class PlayApp
         catch (IOException)
         {
         }
+    }
+
+    private void WriteFrame(string frame)
+    {
+        var lines = FrameNormalizer.NormalizeLines(frame, state.WindowWidth, state.WindowHeight);
+        for (var row = 0; row < lines.Count; row++)
+        {
+            TrySetCursorPosition(0, row);
+            Console.Write(lines[row]);
+        }
+
+        TrySetCursorPosition(0, 0);
     }
 }

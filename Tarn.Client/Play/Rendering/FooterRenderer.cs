@@ -8,9 +8,12 @@ public static class FooterRenderer
     {
         var controls = PlayScreenCatalog.Get(screen).ControlsText;
         var line1 = Layout.Truncate(controls, width);
-        var line2 = Layout.Truncate(
-            PlayScreenCatalog.BuildGlobalNavigationText(width < 90, width < 90 ? string.Empty : "Global nav: "),
-            width);
+        var line2Text = width < 56
+            ? string.Empty
+            : string.Join(" · ", PlayScreenCatalog.GetGlobalNavigationEntries(compact: true));
+        var line2 = string.IsNullOrEmpty(line2Text)
+            ? string.Empty
+            : ScreenText.Secondary(Layout.Truncate($"Screens {line2Text}", width));
         return string.Join(Environment.NewLine, [line1, line2]);
     }
 }

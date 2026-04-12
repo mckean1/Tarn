@@ -10,24 +10,26 @@ public sealed class TableColumn
 
 public static class TableRenderer
 {
-    public static string Render(IReadOnlyList<TableColumn> columns, IReadOnlyList<IReadOnlyList<string>> rows)
+    public static string Render(IReadOnlyList<TableColumn> columns, IReadOnlyList<IReadOnlyList<string>> rows, int selectedRowIndex = -1)
     {
         var builder = new StringBuilder();
-        AppendRow(builder, columns.Select(column => column.Header).ToList(), columns);
+        builder.Append(BuildRow(columns.Select(column => column.Header).ToList(), columns));
         builder.AppendLine();
         builder.AppendLine(string.Join("+", columns.Select(column => new string('-', column.Width))));
 
-        foreach (var row in rows)
+        for (var index = 0; index < rows.Count; index++)
         {
-            AppendRow(builder, row, columns);
+            var rowText = BuildRow(rows[index], columns);
+            builder.Append(index == selectedRowIndex ? TerminalStyle.Selected(rowText) : rowText);
             builder.AppendLine();
         }
 
         return builder.ToString().TrimEnd();
     }
 
-    private static void AppendRow(StringBuilder builder, IReadOnlyList<string> values, IReadOnlyList<TableColumn> columns)
+    private static string BuildRow(IReadOnlyList<string> values, IReadOnlyList<TableColumn> columns)
     {
+        var builder = new StringBuilder();
         for (var index = 0; index < columns.Count; index++)
         {
             if (index > 0)
@@ -38,5 +40,7 @@ public static class TableRenderer
             var value = index < values.Count ? values[index] : string.Empty;
             builder.Append(Layout.Truncate(value, columns[index].Width));
         }
+
+        return builder.ToString();
     }
 }

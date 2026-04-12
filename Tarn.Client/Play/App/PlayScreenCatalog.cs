@@ -21,7 +21,7 @@ public static class PlayScreenCatalog
             "Dash",
             "Dashboard",
             InputAction.Screen1,
-            "Arrows move | Enter select | A advance | ? help | Q quit",
+            "↑↓ Move  Enter Select  A Advance Week  ? Help  Q Quit",
             "Dashboard: arrows move, Enter selects, A advances the week.",
             new DashboardController(),
             DashboardRenderer.Render,
@@ -32,8 +32,8 @@ public static class PlayScreenCatalog
             "Sch",
             "Schedule",
             InputAction.Screen2,
-            "Arrows move/week | Enter replay | Esc back | ? help",
-            "Schedule: Left/Right changes week, Enter opens an available replay.",
+            "↑↓ Move  ←→ Week  Enter Replay  Esc Back  ? Help",
+            "Schedule: Up/Down changes fixture focus, Left/Right changes week, and Enter opens an available replay.",
             new ScheduleController(),
             ScheduleRenderer.Render,
             static (refresh, state) => refresh.RefreshSchedule(state)),
@@ -43,7 +43,7 @@ public static class PlayScreenCatalog
             "Match",
             "Match",
             InputAction.Screen3,
-            "N event | R round | P autoplay | Esc back | ? help",
+            "N Next  R Round  P Autoplay  Esc Back  ? Help",
             "Replay: N steps events, R jumps rounds, P toggles autoplay.",
             new MatchCenterController(),
             MatchCenterRenderer.Render,
@@ -127,11 +127,14 @@ public static class PlayScreenCatalog
 
     public static string BuildGlobalNavigationText(bool compact, string prefix)
     {
-        var labels = AllScreens
-            .Where(screen => screen.ShortcutAction is not null)
-            .Select(screen => $"{ResolveShortcutNumber(screen.ShortcutAction!.Value)} {(compact ? screen.CompactLabel : screen.FullLabel)}");
-        return prefix + string.Join(compact ? " " : "  ", labels);
+        return prefix + string.Join(compact ? " " : "  ", GetGlobalNavigationEntries(compact));
     }
+
+    public static IReadOnlyList<string> GetGlobalNavigationEntries(bool compact) =>
+        AllScreens
+            .Where(screen => screen.ShortcutAction is not null)
+            .Select(screen => $"{ResolveShortcutNumber(screen.ShortcutAction!.Value)} {(compact ? screen.CompactLabel : screen.FullLabel)}")
+            .ToList();
 
     private static int ResolveShortcutNumber(InputAction action) => action switch
     {

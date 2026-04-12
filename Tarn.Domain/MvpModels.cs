@@ -122,6 +122,21 @@ public sealed class Match
     public int? HomeSeed { get; init; }
     public int? AwaySeed { get; init; }
     public MatchResult? Result { get; set; }
+    public HistoricalMatchSetup? ReplaySetup { get; set; }
+}
+
+public sealed class HistoricalMatchSetup
+{
+    public required int Seed { get; init; }
+    public required HistoricalDeckSetup HomeDeck { get; init; }
+    public required HistoricalDeckSetup AwayDeck { get; init; }
+    public required InitiativeContext Initiative { get; init; }
+}
+
+public sealed class HistoricalDeckSetup
+{
+    public required string ChampionCardId { get; init; }
+    public required List<string> NonChampionCardIds { get; init; }
 }
 
 public sealed class Season
