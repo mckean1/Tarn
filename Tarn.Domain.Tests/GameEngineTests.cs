@@ -5,495 +5,189 @@ namespace Tarn.Domain.Tests;
 public sealed class GameEngineTests
 {
     [Fact]
-    public void DeckValidation_IgnoresChampionPowerForMainDeckCap()
-    {
-        var champion = new ChampionDefinition("high-power-champion", Power: 90, BaseAttack: 0, BaseHealth: 20);
-        var mainDeck = Enumerable.Range(1, 30)
-            .Select(index => (CardDefinition)new SpellDefinition($"spell-{index}", Power: 3))
-            .ToList();
-        var deck = new DeckDefinition(champion, mainDeck);
-
-        deck.Validate();
-
-        Assert.Equal(90, deck.MainDeckPower);
-        Assert.Equal(180, deck.TotalPower);
-    }
-
-    [Fact]
-    public void DeckValidation_FailsWhenMainDeckPowerExceedsCap()
-    {
-        var champion = TarnFixtures.GenericChampion("champion");
-        var mainDeck = Enumerable.Range(1, 30)
-            .Select(index => (CardDefinition)new SpellDefinition($"spell-{index}", Power: 4))
-            .ToList();
-        var deck = new DeckDefinition(champion, mainDeck);
-
-        var action = () => deck.Validate();
-
-        Assert.Throws<InvalidOperationException>(action);
-        Assert.Equal(120, deck.MainDeckPower);
-    }
-
-    [Fact]
-    public void QuickCardResolvesBeforeNormalCard()
+    public void SameSeedProducesSameReplay()
     {
         var engine = new GameEngine();
-        var fastSpell = TarnFixtures.GenericSpell(
-            "quick-spell",
-            keywords: Keyword.Quick,
-            onPlayed:
-            [
-                new EffectDefinition(EffectType.Damage, TargetSelector.EnemyChampion, Amount: 2),
-            ]);
-        var slowSpell = TarnFixtures.GenericSpell(
-            "slow-spell",
-            onPlayed:
-            [
-                new EffectDefinition(EffectType.Damage, TargetSelector.EnemyChampion, Amount: 1),
-            ]);
 
-        var game = engine.CreateGame(
-            higherSeedPlayerId: "p1",
-            playerOneId: "p1",
-            playerOneDeck: TarnFixtures.BuildDeck(TarnFixtures.GenericChampion("champion-a"), fastSpell),
-            playerTwoId: "p2",
-            playerTwoDeck: TarnFixtures.BuildDeck(TarnFixtures.GenericChampion("champion-b"), slowSpell),
-            seed: 7,
-            gameNumber: 1);
+        var first = engine.RunRandomMatch(123);
+        var second = engine.RunRandomMatch(123);
 
-        game.PlayerOne.Library = new Queue<CardDefinition>([fastSpell]);
-        game.PlayerTwo.Library = new Queue<CardDefinition>([slowSpell]);
-
-        engine.PlayRound(game);
-
-        var quickIndex = game.Logs.FindIndex(entry => entry.Message.Contains("Spell quick-spell resolves", StringComparison.Ordinal));
-        var slowIndex = game.Logs.FindIndex(entry => entry.Message.Contains("Spell slow-spell resolves", StringComparison.Ordinal));
-
-        Assert.True(quickIndex >= 0 && slowIndex >= 0);
-        Assert.True(quickIndex < slowIndex);
+        Assert.Equal(first.WinnerPlayerId, second.WinnerPlayerId);
+        Assert.Equal(first.ReplayText, second.ReplayText);
     }
 
     [Fact]
-    public void UnitsPlayedThisRoundDoNotAttack()
+    public void UnitsDoNotAttackOnTheTurnTheyEnter()
     {
         var engine = new GameEngine();
-        var attacker = TarnFixtures.GenericUnit("attacker", attack: 3, health: 2);
+        var state = engine.CreateMatchState(TarnFixtures.BuildSetup(
+            seed: 1,
+            championOne: "CH001",
+            deckOne: ["UN014"],
+            championTwo: "CH020",
+            deckTwo: ["SP006"]));
 
-        var game = engine.CreateGame(
-            higherSeedPlayerId: "p1",
-            playerOneId: "p1",
-            playerOneDeck: TarnFixtures.BuildDeck(TarnFixtures.GenericChampion("champion-a"), attacker),
-            playerTwoId: "p2",
-            playerTwoDeck: TarnFixtures.BuildDeck(TarnFixtures.GenericChampion("champion-b")),
-            seed: 11,
-            gameNumber: 1);
+        engine.PlaySingleRound(state);
 
-        game.PlayerOne.Library = new Queue<CardDefinition>([attacker]);
-        game.PlayerTwo.Library = new Queue<CardDefinition>();
-
-        engine.PlayRound(game);
-
-        Assert.Equal(19, game.PlayerTwo.Champion.CurrentHealth);
-        Assert.DoesNotContain(game.Logs, entry => entry.Message.Contains("attacks for 3", StringComparison.Ordinal));
+        Assert.Equal(20, state.PlayerTwo.Champion.Health);
+        Assert.DoesNotContain(state.ReplayLog, line => line.Contains("P1-UN014", StringComparison.Ordinal) && line.Contains("attacks", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void DefenderRedirectsDamageInPlayOrder()
+    public void DefenderAbsorbsEnemyUnitAttackDamageToChampion()
     {
         var engine = new GameEngine();
-        var defenderOne = TarnFixtures.GenericUnit("defender-1", attack: 0, health: 1, keywords: Keyword.Defender);
-        var defenderTwo = TarnFixtures.GenericUnit("defender-2", attack: 0, health: 2, keywords: Keyword.Defender);
-        var burn = TarnFixtures.GenericSpell(
-            "burn",
-            onPlayed:
-            [
-                new EffectDefinition(EffectType.Damage, TargetSelector.EnemyChampion, Amount: 4),
-            ]);
+        var state = engine.CreateMatchState(TarnFixtures.BuildSetup(
+            seed: 2,
+            championOne: "CH001",
+            deckOne: ["SP006"],
+            championTwo: "CH020",
+            deckTwo: ["SP006"]));
 
-        var game = engine.CreateGame(
-            higherSeedPlayerId: "p1",
-            playerOneId: "p1",
-            playerOneDeck: TarnFixtures.BuildDeck(TarnFixtures.GenericChampion("champion-a"), burn),
-            playerTwoId: "p2",
-            playerTwoDeck: TarnFixtures.BuildDeck(TarnFixtures.GenericChampion("champion-b")),
-            seed: 17,
-            gameNumber: 1);
+        state.PlayerOne.Battlefield.Add(CreateUnit("P1", "UN014", zoneOrder: 1, enteredRound: 0));
+        state.PlayerTwo.Battlefield.Add(CreateUnit("P2", "UN001", zoneOrder: 2, enteredRound: 0));
 
-        game.PlayerTwo.Board.Add(new CombatCardState
+        engine.PlaySingleRound(state);
+
+        Assert.Equal(20, state.PlayerTwo.Champion.Health);
+        Assert.Empty(state.PlayerTwo.Battlefield);
+        Assert.Contains(state.ReplayLog, line => line.Contains("assigned to Defender", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void MagnetRedirectsTargetedUnitSpellEffects()
+    {
+        var engine = new GameEngine();
+        var state = engine.CreateMatchState(TarnFixtures.BuildSetup(
+            seed: 3,
+            championOne: "CH001",
+            deckOne: ["SP001"],
+            championTwo: "CH020",
+            deckTwo: ["SP006"]));
+
+        var olderNormal = CreateUnit("P2", "UN015", zoneOrder: 1, enteredRound: 0);
+        var newerMagnet = CreateUnit("P2", "UN005", zoneOrder: 2, enteredRound: 0);
+        state.PlayerTwo.Battlefield.Add(olderNormal);
+        state.PlayerTwo.Battlefield.Add(newerMagnet);
+
+        engine.PlaySingleRound(state);
+
+        Assert.Equal(5, olderNormal.Health);
+        Assert.Equal(0, newerMagnet.Health);
+        Assert.Contains(state.ReplayLog, line => line.Contains(newerMagnet.InstanceId, StringComparison.Ordinal) && line.Contains("takes 2 damage", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void CounterCanCounterCounter()
+    {
+        var engine = new GameEngine();
+        var state = engine.CreateMatchState(TarnFixtures.BuildSetup(
+            seed: 4,
+            championOne: "CH001",
+            deckOne: ["SP001"],
+            championTwo: "CH020",
+            deckTwo: ["SP006"]));
+
+        state.PlayerOne.CounterZone.Add(new CounterState
         {
-            InstanceId = "p2-d1",
-            OwnerId = "p2",
-            Definition = defenderOne,
-            EnteredRound = 0,
-            PlayOrder = 1,
-            CurrentHealth = 1,
+            InstanceId = "P1-CT003-prep",
+            OwnerId = "P1",
+            Card = (CounterCardDefinition)TarnCardRegistry.Get("CT003"),
+            ZoneOrder = 1,
         });
-        game.PlayerTwo.Board.Add(new CombatCardState
+        state.PlayerTwo.CounterZone.Add(new CounterState
         {
-            InstanceId = "p2-d2",
-            OwnerId = "p2",
-            Definition = defenderTwo,
-            EnteredRound = 0,
-            PlayOrder = 2,
-            CurrentHealth = 2,
+            InstanceId = "P2-CT001-prep",
+            OwnerId = "P2",
+            Card = (CounterCardDefinition)TarnCardRegistry.Get("CT001"),
+            ZoneOrder = 2,
         });
-        game.PlayerOne.Library = new Queue<CardDefinition>([burn]);
-        game.PlayerTwo.Library = new Queue<CardDefinition>([TarnFixtures.GenericSpell("blank")]);
+        state.PlayerTwo.Battlefield.Add(CreateUnit("P2", "UN014", zoneOrder: 3, enteredRound: 0));
 
-        engine.PlayRound(game);
+        engine.PlaySingleRound(state);
 
-        Assert.Equal(19, game.PlayerTwo.Champion.CurrentHealth);
-        Assert.Empty(game.PlayerTwo.Board);
-        Assert.Contains(game.Logs, entry => entry.Message.Contains("redirected to Defender p2-d1", StringComparison.Ordinal));
-        Assert.Contains(game.Logs, entry => entry.Message.Contains("redirected to Defender p2-d2", StringComparison.Ordinal));
+        Assert.Empty(state.PlayerTwo.Battlefield);
+        Assert.Contains(state.ReplayLog, line => line.Contains("CT003 counters", StringComparison.Ordinal));
+        Assert.Contains(state.ReplayLog, line => line.Contains("P2-CT001-prep counter effect is countered", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void CounterOnlyTriggersOnFutureEventsAfterItIsSet()
+    public void OnDeathHappensBeforeLeavePlayAndOnDestroyedAfter()
     {
         var engine = new GameEngine();
-        var counter = TarnFixtures.GenericCounter(
-            "future-counter",
-            TriggerEventType.ChampionDamaged,
-            onTrigger:
-            [
-                new EffectDefinition(EffectType.Damage, TargetSelector.EnemyChampion, Amount: 1),
-            ]);
-        var burn = TarnFixtures.GenericSpell(
-            "burn",
-            onPlayed:
-            [
-                new EffectDefinition(EffectType.Damage, TargetSelector.EnemyChampion, Amount: 1),
-            ]);
+        var state = engine.CreateMatchState(TarnFixtures.BuildSetup(
+            seed: 5,
+            championOne: "CH020",
+            deckOne: ["SP006"],
+            championTwo: "CH001",
+            deckTwo: ["SP002"]));
 
-        var game = engine.CreateGame(
-            higherSeedPlayerId: "p1",
-            playerOneId: "p1",
-            playerOneDeck: TarnFixtures.BuildDeck(TarnFixtures.GenericChampion("champion-a"), counter, burn),
-            playerTwoId: "p2",
-            playerTwoDeck: TarnFixtures.BuildDeck(TarnFixtures.GenericChampion("champion-b")),
-            seed: 19,
-            gameNumber: 1);
+        var anchor = CreateUnit("P1", "UN015", zoneOrder: 1, enteredRound: 0);
+        var graveTender = CreateUnit("P1", "UN009", zoneOrder: 2, enteredRound: 0);
+        var ashDrifter = CreateUnit("P1", "UN010", zoneOrder: 3, enteredRound: 0);
+        state.PlayerOne.Battlefield.Add(anchor);
+        state.PlayerOne.Battlefield.Add(graveTender);
+        state.PlayerOne.Battlefield.Add(ashDrifter);
 
-        game.PlayerOne.Library = new Queue<CardDefinition>([counter, burn]);
-        game.PlayerTwo.Library = new Queue<CardDefinition>([TarnFixtures.GenericSpell("blank-1"), TarnFixtures.GenericSpell("blank-2")]);
+        engine.PlaySingleRound(state);
 
-        engine.PlayRound(game);
-        Assert.Equal(20, game.PlayerTwo.Champion.CurrentHealth);
+        var deathTriggerIndex = IndexOf(state.ReplayLog, "UN009 On Death");
+        var graveTenderLeavesIndex = IndexOf(state.ReplayLog, "P1-UN009-2 leaves the Battlefield");
+        var ashLeavesIndex = IndexOf(state.ReplayLog, "P1-UN010-3 leaves the Battlefield");
+        var destroyedTriggerIndex = IndexOf(state.ReplayLog, "UN010 On Destroyed");
 
-        engine.PlayRound(game);
-        Assert.Equal(18, game.PlayerTwo.Champion.CurrentHealth);
-        Assert.Contains(game.Logs, entry => entry.Message.Contains("Counter future-counter triggers", StringComparison.Ordinal));
+        Assert.True(deathTriggerIndex >= 0 && graveTenderLeavesIndex >= 0 && deathTriggerIndex < graveTenderLeavesIndex);
+        Assert.True(ashLeavesIndex >= 0 && destroyedTriggerIndex >= 0 && ashLeavesIndex < destroyedTriggerIndex);
     }
 
     [Fact]
-    public void SimultaneousBatch_DoesNotTargetUnitThatEnteredFromSameBatch()
+    public void DoubleLethalEntersOvertimeInsteadOfDraw()
     {
         var engine = new GameEngine();
-        var snipe = TarnFixtures.GenericSpell(
-            "snipe",
-            onPlayed:
-            [
-                new EffectDefinition(EffectType.Damage, TargetSelector.AutoEnemyUnit, Amount: 2),
-            ]);
-        var entrant = TarnFixtures.GenericUnit("entrant", attack: 0, health: 2);
+        var state = engine.CreateMatchState(TarnFixtures.BuildSetup(
+            seed: 6,
+            championOne: "CH019",
+            deckOne: ["CT001"],
+            championTwo: "CH019",
+            deckTwo: ["CT001"]));
 
-        var game = engine.CreateGame(
-            higherSeedPlayerId: "p1",
-            playerOneId: "p1",
-            playerOneDeck: TarnFixtures.BuildDeck(TarnFixtures.GenericChampion("champion-a"), snipe),
-            playerTwoId: "p2",
-            playerTwoDeck: TarnFixtures.BuildDeck(TarnFixtures.GenericChampion("champion-b"), entrant),
-            seed: 31,
-            gameNumber: 1);
+        state.PlayerOne.Champion.Health = 0;
+        state.PlayerTwo.Champion.Health = 0;
 
-        game.PlayerOne.Library = new Queue<CardDefinition>([snipe]);
-        game.PlayerTwo.Library = new Queue<CardDefinition>([entrant]);
+        engine.PlaySingleRound(state);
 
-        engine.PlayRound(game);
-
-        var survivingUnit = Assert.Single(game.PlayerTwo.Board);
-        Assert.Equal("entrant", survivingUnit.Definition.Id);
-        Assert.Equal(2, survivingUnit.CurrentHealth);
-        Assert.DoesNotContain(game.Logs, entry => entry.Message.Contains("takes 2 damage", StringComparison.Ordinal));
+        Assert.True(state.OvertimePending);
+        Assert.Null(state.WinnerPlayerId);
+        Assert.Contains(state.ReplayLog, line => line.Contains("Enter Overtime", StringComparison.Ordinal));
     }
 
-    [Fact]
-    public void SimultaneousBatch_UsesPreBatchBoardForAutomaticTargeting()
+    private static UnitState CreateUnit(string ownerId, string cardId, long zoneOrder, int enteredRound)
     {
-        var engine = new GameEngine();
-        var snipe = TarnFixtures.GenericSpell(
-            "snipe",
-            onPlayed:
-            [
-                new EffectDefinition(EffectType.Damage, TargetSelector.AutoEnemyUnit, Amount: 2),
-            ]);
-        var oldUnitDefinition = TarnFixtures.GenericUnit("old-unit", attack: 0, health: 2);
-        var entrant = TarnFixtures.GenericUnit("entrant", attack: 0, health: 2);
-
-        var game = engine.CreateGame(
-            higherSeedPlayerId: "p1",
-            playerOneId: "p1",
-            playerOneDeck: TarnFixtures.BuildDeck(TarnFixtures.GenericChampion("champion-a"), snipe),
-            playerTwoId: "p2",
-            playerTwoDeck: TarnFixtures.BuildDeck(TarnFixtures.GenericChampion("champion-b"), entrant),
-            seed: 37,
-            gameNumber: 1);
-
-        game.PlayerTwo.Board.Add(new CombatCardState
+        var card = (UnitCardDefinition)TarnCardRegistry.Get(cardId);
+        return new UnitState
         {
-            InstanceId = "p2-old",
-            OwnerId = "p2",
-            Definition = oldUnitDefinition,
-            EnteredRound = 0,
-            PlayOrder = 1,
-            CurrentHealth = 2,
-        });
-        game.PlayerOne.Library = new Queue<CardDefinition>([snipe]);
-        game.PlayerTwo.Library = new Queue<CardDefinition>([entrant]);
-
-        engine.PlayRound(game);
-
-        var survivingUnit = Assert.Single(game.PlayerTwo.Board);
-        Assert.Equal("entrant", survivingUnit.Definition.Id);
-        Assert.Equal(2, survivingUnit.CurrentHealth);
-        Assert.Contains(game.Logs, entry => entry.Message.Contains("p2-old takes 2 damage", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void SimultaneousBatch_DefenderDamageDoesNotLeakIntoChampionInterception()
-    {
-        var engine = new GameEngine();
-        var hitDefender = TarnFixtures.GenericSpell(
-            "hit-defender",
-            onPlayed:
-            [
-                new EffectDefinition(EffectType.Damage, TargetSelector.AutoEnemyUnit, Amount: 2),
-            ]);
-        var hitChampion = TarnFixtures.GenericSpell(
-            "hit-champion",
-            onPlayed:
-            [
-                new EffectDefinition(EffectType.Damage, TargetSelector.EnemyChampion, Amount: 2),
-            ]);
-        var defenderDefinition = TarnFixtures.GenericUnit("defender", attack: 0, health: 2, keywords: Keyword.Defender);
-
-        var game = engine.CreateGame(
-            higherSeedPlayerId: "p1",
-            playerOneId: "p1",
-            playerOneDeck: TarnFixtures.BuildDeck(TarnFixtures.GenericChampion("champion-a"), hitDefender),
-            playerTwoId: "p2",
-            playerTwoDeck: TarnFixtures.BuildDeck(TarnFixtures.GenericChampion("champion-b"), hitChampion),
-            seed: 47,
-            gameNumber: 1);
-
-        game.PlayerOne.Library = new Queue<CardDefinition>([hitDefender]);
-        game.PlayerTwo.Library = new Queue<CardDefinition>([hitChampion]);
-        game.PlayerOne.Board.Add(new CombatCardState
-        {
-            InstanceId = "p1-defender",
-            OwnerId = "p1",
-            Definition = defenderDefinition,
-            EnteredRound = 0,
-            PlayOrder = 1,
-            CurrentHealth = 2,
-        });
-
-        engine.PlayRound(game);
-
-        Assert.Equal(20, game.PlayerOne.Champion.CurrentHealth);
-        Assert.Empty(game.PlayerOne.Board);
-        Assert.Contains(game.Logs, entry => entry.Message.Contains("2 damage is redirected to Defender p1-defender", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void SimultaneousBatch_MultipleChampionDamagePacketsUseSamePreBatchDefenderState()
-    {
-        var engine = new GameEngine();
-        var doubleStrike = TarnFixtures.GenericSpell(
-            "double-strike",
-            onPlayed:
-            [
-                // Same-batch packets each calculate Defender interception from the same pre-batch state.
-                new EffectDefinition(EffectType.Damage, TargetSelector.EnemyChampion, Amount: 2),
-                new EffectDefinition(EffectType.Damage, TargetSelector.EnemyChampion, Amount: 2),
-            ]);
-        var defenderDefinition = TarnFixtures.GenericUnit("defender", attack: 0, health: 2, keywords: Keyword.Defender);
-
-        var game = engine.CreateGame(
-            higherSeedPlayerId: "p1",
-            playerOneId: "p1",
-            playerOneDeck: TarnFixtures.BuildDeck(TarnFixtures.GenericChampion("champion-a"), doubleStrike),
-            playerTwoId: "p2",
-            playerTwoDeck: TarnFixtures.BuildDeck(TarnFixtures.GenericChampion("champion-b")),
-            seed: 53,
-            gameNumber: 1);
-
-        game.PlayerOne.Library = new Queue<CardDefinition>([doubleStrike]);
-        game.PlayerTwo.Library = new Queue<CardDefinition>([TarnFixtures.GenericSpell("blank")]);
-        game.PlayerTwo.Board.Add(new CombatCardState
-        {
-            InstanceId = "p2-defender",
-            OwnerId = "p2",
-            Definition = defenderDefinition,
-            EnteredRound = 0,
-            PlayOrder = 1,
-            CurrentHealth = 2,
-        });
-
-        engine.PlayRound(game);
-
-        Assert.Equal(20, game.PlayerTwo.Champion.CurrentHealth);
-        Assert.Empty(game.PlayerTwo.Board);
-        Assert.Equal(
-            2,
-            game.Logs.Count(entry => entry.Message.Contains("2 damage is redirected to Defender p2-defender", StringComparison.Ordinal)));
-    }
-
-    [Fact]
-    public void SimultaneousBatch_ChampionInterceptionDoesNotReadLiveDefenderHealth()
-    {
-        var engine = new GameEngine();
-        var damageSource = TarnFixtures.GenericSpell(
-            "damage-source",
-            keywords: Keyword.Quick,
-            onPlayed:
-            [
-                new EffectDefinition(EffectType.Damage, TargetSelector.AutoEnemyUnit, Amount: 1),
-            ]);
-        var championHit = TarnFixtures.GenericSpell(
-            "champion-hit",
-            keywords: Keyword.Quick,
-            onPlayed:
-            [
-                new EffectDefinition(EffectType.Damage, TargetSelector.EnemyChampion, Amount: 2),
-            ]);
-        var defenderDefinition = TarnFixtures.GenericUnit("defender", attack: 0, health: 1, keywords: Keyword.Defender);
-
-        var game = engine.CreateGame(
-            higherSeedPlayerId: "p1",
-            playerOneId: "p1",
-            playerOneDeck: TarnFixtures.BuildDeck(TarnFixtures.GenericChampion("champion-a"), damageSource),
-            playerTwoId: "p2",
-            playerTwoDeck: TarnFixtures.BuildDeck(TarnFixtures.GenericChampion("champion-b"), championHit),
-            seed: 59,
-            gameNumber: 1);
-
-        game.PlayerOne.Library = new Queue<CardDefinition>([damageSource]);
-        game.PlayerTwo.Library = new Queue<CardDefinition>([championHit]);
-        game.PlayerOne.Board.Add(new CombatCardState
-        {
-            InstanceId = "p1-defender",
-            OwnerId = "p1",
-            Definition = defenderDefinition,
-            EnteredRound = 0,
-            PlayOrder = 1,
-            CurrentHealth = 1,
-        });
-
-        engine.PlayRound(game);
-
-        Assert.Equal(19, game.PlayerOne.Champion.CurrentHealth);
-        Assert.Empty(game.PlayerOne.Board);
-        Assert.Contains(game.Logs, entry => entry.Message.Contains("1 damage is redirected to Defender p1-defender", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void QuickBatch_IsStillSimultaneousWithinTheQuickStep()
-    {
-        var engine = new GameEngine();
-        var quickSnipe = TarnFixtures.GenericSpell(
-            "quick-snipe",
-            keywords: Keyword.Quick,
-            onPlayed:
-            [
-                new EffectDefinition(EffectType.Damage, TargetSelector.AutoEnemyUnit, Amount: 2),
-            ]);
-        var quickEntrant = TarnFixtures.GenericUnit("quick-entrant", attack: 0, health: 2, keywords: Keyword.Quick);
-
-        var game = engine.CreateGame(
-            higherSeedPlayerId: "p1",
-            playerOneId: "p1",
-            playerOneDeck: TarnFixtures.BuildDeck(TarnFixtures.GenericChampion("champion-a"), quickSnipe),
-            playerTwoId: "p2",
-            playerTwoDeck: TarnFixtures.BuildDeck(TarnFixtures.GenericChampion("champion-b"), quickEntrant),
-            seed: 41,
-            gameNumber: 1);
-
-        game.PlayerOne.Library = new Queue<CardDefinition>([quickSnipe]);
-        game.PlayerTwo.Library = new Queue<CardDefinition>([quickEntrant]);
-
-        engine.PlayRound(game);
-
-        var survivingUnit = Assert.Single(game.PlayerTwo.Board);
-        Assert.Equal("quick-entrant", survivingUnit.Definition.Id);
-        Assert.Equal(2, survivingUnit.CurrentHealth);
-        Assert.DoesNotContain(game.Logs, entry => entry.Message.Contains("quick-entrant") && entry.Message.Contains("takes 2 damage", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void FatigueIncreasesByOnePerInstance()
-    {
-        var engine = new GameEngine();
-        var game = engine.CreateGame(
-            higherSeedPlayerId: "p1",
-            playerOneId: "p1",
-            playerOneDeck: TarnFixtures.BuildDeck(TarnFixtures.GenericChampion("champion-a")),
-            playerTwoId: "p2",
-            playerTwoDeck: TarnFixtures.BuildDeck(TarnFixtures.GenericChampion("champion-b")),
-            seed: 23,
-            gameNumber: 1);
-
-        game.PlayerOne.Library.Clear();
-        game.PlayerTwo.Library.Clear();
-
-        engine.PlayRound(game);
-        engine.PlayRound(game);
-
-        Assert.Equal(17, game.PlayerOne.Champion.CurrentHealth);
-        Assert.Equal(2, game.PlayerOne.FatigueCount);
-    }
-
-    [Fact]
-    public void PlayGame_AllowsGamesToContinuePastTwoHundredRounds()
-    {
-        var engine = new GameEngine();
-        var playerOneDeck = TarnFixtures.BuildDeck(new ChampionDefinition("champion-a", Power: 0, BaseAttack: 1, BaseHealth: 25000));
-        var playerTwoDeck = TarnFixtures.BuildDeck(new ChampionDefinition("champion-b", Power: 0, BaseAttack: 0, BaseHealth: 25000));
-
-        var game = engine.CreateGame(
-            higherSeedPlayerId: "p1",
-            playerOneId: "p1",
-            playerOneDeck: playerOneDeck,
-            playerTwoId: "p2",
-            playerTwoDeck: playerTwoDeck,
-            seed: 43,
-            gameNumber: 1);
-
-        var winner = engine.PlayGame(game);
-
-        Assert.Equal("p1", winner);
-        Assert.True(game.RoundNumber > 200);
-    }
-
-    [Fact]
-    public void MatchScoringFollowsLockedLeagueRules()
-    {
-        var match = new MatchResult
-        {
-            WinnerPlayerId = "p1",
-            LoserPlayerId = "p2",
-            WinnerGameWins = 2,
-            LoserGameWins = 1,
-            Games =
-            [
-                new GameResult(1, 0, "p1", "p2"),
-                new GameResult(1, 0, "p2", "p1"),
-                new GameResult(1, 0, "p1", "p2"),
-            ],
+            InstanceId = $"{ownerId}-{cardId}-{zoneOrder}",
+            OwnerId = ownerId,
+            Card = card,
+            EnteredRound = enteredRound,
+            ZoneOrder = zoneOrder,
+            Attack = card.Attack,
+            Health = card.Health,
+            HasDefender = card.HasDefender,
+            HasMagnet = card.HasMagnet,
         };
+    }
 
-        Assert.Equal(2, match.WinnerMatchPoints);
-        Assert.Equal(1, match.LoserMatchPoints);
+    private static int IndexOf(IReadOnlyList<string> lines, string fragment)
+    {
+        for (var index = 0; index < lines.Count; index++)
+        {
+            if (lines[index].Contains(fragment, StringComparison.Ordinal))
+            {
+                return index;
+            }
+        }
+
+        return -1;
     }
 }
