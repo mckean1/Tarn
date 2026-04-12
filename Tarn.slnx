@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="Tarn.Client/Tarn.Client.csproj" />
+  <Project Path="Tarn.Domain.Tests/Tarn.Domain.Tests.csproj" />
+  <Project Path="Tarn.Domain/Tarn.Domain.csproj" />
+</Solution>
